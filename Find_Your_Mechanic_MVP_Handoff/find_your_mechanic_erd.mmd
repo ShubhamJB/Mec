@@ -1,0 +1,189 @@
+erDiagram
+    USERS ||--o{ GARAGES : owns
+    GARAGES ||--o{ GARAGE_REGISTRATION_HISTORY : has
+    USERS o|--o{ GARAGE_REGISTRATION_HISTORY : reviews
+    GARAGES ||--o{ GARAGE_SERVICES : offers
+    SERVICES ||--o{ GARAGE_SERVICES : selected_by
+    GARAGES ||--o{ GARAGE_VEHICLE_TYPES : supports
+    VEHICLE_TYPES ||--o{ GARAGE_VEHICLE_TYPES : selected_by
+    GARAGES ||--|{ OPERATING_HOURS : schedules
+    GARAGES ||--o{ GARAGE_PHOTOS : displays
+    GARAGES ||--o{ REVIEWS : receives
+    USERS ||--o{ REVIEWS : writes
+    REVIEWS ||--o{ REVIEW_REPORTS : reported_in
+    USERS ||--o{ REVIEW_REPORTS : reports
+    USERS ||--o{ NOTIFICATIONS : receives
+    GARAGES ||--o{ ANALYTICS_EVENTS : records
+    USERS o|--o{ ANALYTICS_EVENTS : optionally_generates
+    USERS ||--o{ ADMIN_ACTIONS : performs
+    USERS ||--o{ REFRESH_TOKENS : owns
+    USERS ||--o{ EMAIL_VERIFICATION_TOKENS : verifies
+    GARAGES ||--o{ GARAGE_PROFILE_CHANGE_REQUESTS : requests
+    USERS ||--o{ GARAGE_PROFILE_CHANGE_REQUESTS : submits
+    USERS o|--o{ GARAGE_PROFILE_CHANGE_REQUESTS : reviews
+
+    USERS {
+      uuid id PK
+      string full_name
+      string email UK
+      string password_hash
+      string role
+      boolean email_verified
+      string account_status
+      timestamptz created_at
+      timestamptz updated_at
+      timestamptz deleted_at
+    }
+    GARAGES {
+      uuid id PK
+      uuid owner_id FK
+      string name
+      string description
+      string phone
+      string address
+      geography location
+      string timezone
+      string approval_status
+      boolean is_suspended
+      boolean is_temporarily_unavailable
+      string temporary_unavailability_message
+      int registration_version
+      timestamptz created_at
+      timestamptz updated_at
+      timestamptz deleted_at
+    }
+    GARAGE_REGISTRATION_HISTORY {
+      uuid id PK
+      uuid garage_id FK
+      uuid reviewed_by FK
+      string status
+      jsonb submission_data
+      string rejection_reason
+      timestamptz submitted_at
+      timestamptz reviewed_at
+    }
+    SERVICES {
+      uuid id PK
+      string name
+      boolean is_predefined
+      uuid created_by_user_id FK
+      boolean is_active
+      timestamptz created_at
+    }
+    GARAGE_SERVICES {
+      uuid garage_id PK, FK
+      uuid service_id PK, FK
+      timestamptz created_at
+    }
+    VEHICLE_TYPES {
+      uuid id PK
+      string name
+      boolean is_predefined
+      uuid created_by_user_id FK
+      boolean is_active
+      timestamptz created_at
+    }
+    GARAGE_VEHICLE_TYPES {
+      uuid garage_id PK, FK
+      uuid vehicle_type_id PK, FK
+      timestamptz created_at
+    }
+    OPERATING_HOURS {
+      uuid id PK
+      uuid garage_id FK
+      int day_of_week
+      boolean is_closed
+      time opening_time
+      time closing_time
+    }
+    GARAGE_PHOTOS {
+      uuid id PK
+      uuid garage_id FK
+      string url
+      string storage_key
+      string caption
+      int display_order
+      timestamptz deleted_at
+      timestamptz created_at
+    }
+    REVIEWS {
+      uuid id PK
+      uuid garage_id FK
+      uuid customer_id FK
+      int rating
+      string comment
+      string status
+      timestamptz created_at
+      timestamptz updated_at
+      timestamptz deleted_at
+      timestamptz removed_at
+      uuid removed_by FK
+    }
+    REVIEW_REPORTS {
+      uuid id PK
+      uuid review_id FK
+      uuid reporter_id FK
+      string reason
+      string status
+      string admin_note
+      uuid reviewed_by FK
+      timestamptz reviewed_at
+      timestamptz created_at
+    }
+    NOTIFICATIONS {
+      uuid id PK
+      uuid user_id FK
+      string title
+      string message
+      string notification_type
+      string related_entity_type
+      uuid related_entity_id
+      boolean is_read
+      timestamptz read_at
+      timestamptz created_at
+    }
+    ANALYTICS_EVENTS {
+      uuid id PK
+      uuid garage_id FK
+      uuid customer_id FK
+      string event_type
+      timestamptz created_at
+    }
+    ADMIN_ACTIONS {
+      uuid id PK
+      uuid admin_id FK
+      string action_type
+      string target_type
+      uuid target_id
+      string reason
+      timestamptz created_at
+    }
+    REFRESH_TOKENS {
+      uuid id PK
+      uuid user_id FK
+      string token_hash
+      timestamptz expires_at
+      timestamptz revoked_at
+      timestamptz created_at
+      string device_info
+    }
+    EMAIL_VERIFICATION_TOKENS {
+      uuid id PK
+      uuid user_id FK
+      string token_hash
+      timestamptz expires_at
+      timestamptz used_at
+      timestamptz revoked_at
+      timestamptz created_at
+    }
+    GARAGE_PROFILE_CHANGE_REQUESTS {
+      uuid id PK
+      uuid garage_id FK
+      uuid submitted_by FK
+      jsonb proposed_changes
+      string status
+      string rejection_reason
+      uuid reviewed_by FK
+      timestamptz submitted_at
+      timestamptz reviewed_at
+    }
