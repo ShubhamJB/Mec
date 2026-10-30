@@ -4,6 +4,7 @@ Service layer for Garage Photos: image validation, storage, ordering, and deleti
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from datetime import datetime, timezone
 from fastapi import HTTPException, UploadFile, status
@@ -15,6 +16,8 @@ from app.core.config import settings
 from app.models.garage import Garage
 from app.models.photo import GaragePhoto
 from app.services.storage_service import storage_service
+
+log = logging.getLogger(__name__)
 
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 
@@ -203,7 +206,6 @@ async def delete_garage_photo(
     try:
         await storage_service.delete_file(storage_key=photo.storage_key)
     except Exception:
-        # Cloud deletion error logged; DB soft-delete preserves state
-        pass
+        log.exception("Cloud deletion failed for storage_key=%s", photo.storage_key)
 
     await db.flush()

@@ -27,7 +27,7 @@ _401 = HTTPException(
 )
 _403_suspended = HTTPException(
     status_code=status.HTTP_403_FORBIDDEN,
-    detail="Account is suspended.",
+    detail="ACCOUNT_SUSPENDED",
 )
 
 

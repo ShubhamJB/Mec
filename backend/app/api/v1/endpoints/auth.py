@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.deps import get_current_user
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.enums import UserRole
 from app.models.user import User
@@ -35,7 +36,9 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Register a new customer account",
 )
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def register_customer(
+    request: Request,
     body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterResponse:
@@ -59,7 +62,9 @@ async def register_customer(
     status_code=status.HTTP_201_CREATED,
     summary="Register a new garage owner account",
 )
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def register_owner(
+    request: Request,
     body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterResponse:
@@ -82,6 +87,7 @@ async def register_owner(
     response_model=TokenResponse,
     summary="Login with email and password",
 )
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def login(
     body: LoginRequest,
     request: Request,
@@ -171,7 +177,9 @@ async def verify_email(
     response_model=MessageResponse,
     summary="Resend email verification link",
 )
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 async def resend_verification(
+    request: Request,
     body: ResendVerificationRequest,
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:

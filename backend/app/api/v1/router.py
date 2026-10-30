@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     auth,
     garages_discovery,
     garages_public,
+    notifications,
     owner_analytics,
     owner_garage,
     owner_garage_registration,
@@ -66,11 +67,5 @@ api_router.include_router(public_garage_vehicle_types_router, tags=["garages"])
 api_router.include_router(owner_services_router, prefix="/owner", tags=["owner-garage"])
 api_router.include_router(owner_vehicle_types_router, prefix="/owner", tags=["owner-garage"])
 
-# Future modules:
-# owner_garage_registration
-# owner_garage
-# owner_analytics
-# garages_public
-# reviews
-# notifications
-# admin
+# Notifications
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

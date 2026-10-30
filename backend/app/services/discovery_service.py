@@ -7,9 +7,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 from fastapi import HTTPException, status
+from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_X, ST_Y
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, null, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.catalog import (
@@ -88,14 +89,14 @@ def _build_base_discovery_query(
     dist_col = (
         (ST_Distance(Garage.location, origin_point) / 1000.0).label("distance_km")
         if origin_point is not None
-        else func.null().label("distance_km")
+        else null().label("distance_km")
     )
 
     query = (
         select(
             Garage,
-            ST_Y(Garage.location.cast(func.geometry())).label("latitude"),
-            ST_X(Garage.location.cast(func.geometry())).label("longitude"),
+            ST_Y(Garage.location.cast(Geometry)).label("latitude"),
+            ST_X(Garage.location.cast(Geometry)).label("longitude"),
             dist_col,
             rev_subq.c.avg_rating,
             func.coalesce(rev_subq.c.rev_count, 0).label("review_count"),
@@ -298,20 +299,20 @@ async def list_garages(
     )
 
     # Sorting
+    avg_rating = query.selected_columns.avg_rating
+    review_count = query.selected_columns.review_count
     if sort_by == "nearest" or (sort_by is None and origin_point is not None):
-        query = query.order_by("distance_km")
+        query = query.order_by("distance_km", Garage.name.asc(), Garage.id)
     elif sort_by == "highest_rated":
-        # Average rating desc (unrated NULLS LAST), then review count desc, then name asc
         query = query.order_by(
-            func.coalesce(select(_get_reviews_subquery().c.avg_rating).scalar_subquery(), -1.0).desc(),
-            "review_count",
-            Garage.name.asc(),
+            avg_rating.desc().nulls_last(), review_count.desc(), Garage.name.asc(), Garage.id
         )
     elif sort_by == "most_reviewed":
-        query = query.order_by("review_count", Garage.name.asc())
+        query = query.order_by(
+            review_count.desc(), avg_rating.desc().nulls_last(), Garage.name.asc(), Garage.id
+        )
     else:
-        # Default without coordinates: highest rated / name
-        query = query.order_by(Garage.name.asc())
+        query = query.order_by(Garage.name.asc(), Garage.id)
 
     # If open_now filter is active, we evaluate availability in application memory
     if open_now:

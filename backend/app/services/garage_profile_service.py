@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from geoalchemy2 import Geometry
 from geoalchemy2.functions import ST_X, ST_Y
 
 from app.models.catalog import (
@@ -47,8 +48,8 @@ async def _get_owner_garage(db: AsyncSession, owner_id: uuid.UUID) -> Garage:
 async def _get_garage_coordinates(db: AsyncSession, garage_id: uuid.UUID) -> tuple[float, float]:
     """Extract (latitude, longitude) from PostGIS geography point."""
     stmt = select(
-        ST_Y(Garage.location.cast(func.geometry())),
-        ST_X(Garage.location.cast(func.geometry())),
+        ST_Y(Garage.location.cast(Geometry)),
+        ST_X(Garage.location.cast(Geometry)),
     ).where(Garage.id == garage_id)
     row = (await db.execute(stmt)).first()
     if row and row[0] is not None and row[1] is not None:

@@ -43,6 +43,12 @@ def make_error_response(
     )
 
 
+SPECIFIC_ERROR_MESSAGES = {
+    "EMAIL_NOT_VERIFIED": "Please verify your email address before logging in.",
+    "ACCOUNT_SUSPENDED": "Your account has been suspended.",
+}
+
+
 # ── Exception handlers to register on the FastAPI app ─────────────────────────
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     rid = getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -58,10 +64,15 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
         429: "RATE_LIMIT_EXCEEDED",
         500: "INTERNAL_SERVER_ERROR",
     }
-    code = code_map.get(exc.status_code, "ERROR")
+    detail = str(exc.detail)
+    if detail in SPECIFIC_ERROR_MESSAGES:
+        code, message = detail, SPECIFIC_ERROR_MESSAGES[detail]
+    else:
+        code, message = code_map.get(exc.status_code, "ERROR"), detail
     return JSONResponse(
         status_code=exc.status_code,
-        content=_envelope(code, str(exc.detail), request_id=rid),
+        content=_envelope(code, message, request_id=rid),
+        headers=getattr(exc, "headers", None),
     )
 
 

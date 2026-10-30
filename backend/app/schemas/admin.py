@@ -31,6 +31,7 @@ class AdminDashboardResponse(BaseModel):
     total_suspended_users: int = 0
     total_garages: int = 0
     pending_registrations: int = 0
+    pending_profile_changes: int = 0
     approved_garages: int = 0
     rejected_garages: int = 0
     suspended_garages: int = 0

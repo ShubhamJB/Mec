@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import ReviewReportStatus, ReviewStatus
+from app.models.enums import NotificationType, ReviewReportStatus, ReviewStatus
 from app.models.garage import Garage
 from app.models.review import Review, ReviewReport
 from app.models.user import User
@@ -22,6 +22,7 @@ from app.schemas.review import (
     ReviewRead,
     ReviewSortOption,
 )
+from app.services.notification_service import notify_admins, notify_user
 from app.services.public_garage_service import verify_public_garage
 
 
@@ -63,6 +64,16 @@ async def submit_review(
     )
     db.add(review)
     await db.flush()
+
+    await notify_user(
+        db=db,
+        user_id=garage.owner_id,
+        notification_type=NotificationType.REVIEW_RECEIVED,
+        title="New review received",
+        message=f"{customer.full_name} rated \"{garage.name}\" {review.rating}/5.",
+        related_entity_type="REVIEW",
+        related_entity_id=review.id,
+    )
 
     return ReviewRead(
         id=review.id,
@@ -272,4 +283,13 @@ async def report_review(
     )
     db.add(report)
     await db.flush()
+
+    await notify_admins(
+        db=db,
+        notification_type=NotificationType.REVIEW_REPORT_RECEIVED,
+        title="Review reported",
+        message=f"A review was reported for reason {dto.reason.value}.",
+        related_entity_type="REVIEW_REPORT",
+        related_entity_id=report.id,
+    )
 

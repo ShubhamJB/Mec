@@ -7,6 +7,7 @@ import uuid
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException, status
+from geoalchemy2 import Geometry
 from geoalchemy2.functions import ST_X, ST_Y
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,8 @@ from app.models.enums import (
     AdminActionType,
     AnalyticsEventType,
     ApprovalStatus,
+    NotificationType,
+    ProfileChangeRequestStatus,
     RegistrationHistoryStatus,
     ReviewReportReason,
     ReviewReportStatus,
@@ -59,6 +62,7 @@ from app.schemas.garage_registration import (
     OperatingHourItem,
 )
 from app.schemas.photo import PhotoRead
+from app.services.notification_service import notify_user
 from app.utils.geo import derive_timezone, point_from_coords
 
 
@@ -105,6 +109,15 @@ async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
     ).where(Garage.deleted_at.is_(None))
     g_row = (await db.execute(garages_q)).first()
 
+    # Pending profile changes
+    profile_changes_count = (
+        await db.execute(
+            select(func.count(GarageProfileChangeRequest.id)).where(
+                GarageProfileChangeRequest.status == ProfileChangeRequestStatus.PENDING
+            )
+        )
+    ).scalar_one()
+
     # Reviews count
     reviews_count = (
         await db.execute(
@@ -139,6 +152,7 @@ async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
         total_suspended_users=int(u_row[3]) if u_row else 0,
         total_garages=int(g_row[0]) if g_row else 0,
         pending_registrations=int(g_row[1]) if g_row else 0,
+        pending_profile_changes=profile_changes_count,
         approved_garages=int(g_row[2]) if g_row else 0,
         rejected_garages=int(g_row[3]) if g_row else 0,
         suspended_garages=int(g_row[4]) if g_row else 0,
@@ -157,9 +171,27 @@ async def list_garage_registrations(
     page: int = 1,
     limit: int = 10,
 ) -> tuple[list[dict], int]:
+    latest_submission = (
+        select(
+            GarageRegistrationHistory.garage_id.label("garage_id"),
+            func.max(GarageRegistrationHistory.submitted_at).label("submitted_at"),
+            func.max(GarageRegistrationHistory.reviewed_at).label("reviewed_at"),
+        )
+        .group_by(GarageRegistrationHistory.garage_id)
+        .subquery()
+    )
+    submitted_at = func.coalesce(latest_submission.c.submitted_at, Garage.created_at)
+    last_activity_at = func.coalesce(latest_submission.c.reviewed_at, submitted_at)
     base_q = (
-        select(Garage, User.full_name, User.email)
+        select(
+            Garage,
+            User.full_name,
+            User.email,
+            submitted_at.label("submitted_at"),
+            latest_submission.c.reviewed_at.label("reviewed_at"),
+        )
         .join(User, Garage.owner_id == User.id)
+        .outerjoin(latest_submission, latest_submission.c.garage_id == Garage.id)
         .where(Garage.deleted_at.is_(None))
     )
     if status_filter:
@@ -174,7 +206,7 @@ async def list_garage_registrations(
     rows = list(
         (
             await db.execute(
-                base_q.order_by(Garage.created_at.desc())
+                base_q.order_by(last_activity_at.desc(), Garage.id)
                 .offset((page - 1) * limit)
                 .limit(limit)
             )
@@ -183,16 +215,19 @@ async def list_garage_registrations(
 
     items = [
         {
-            "garage_id": r[0].id,
+            "id": str(r[0].id),
+            "garage_id": str(r[0].id),
             "name": r[0].name,
+            "garage_name": r[0].name,
             "phone": r[0].phone,
             "address": r[0].address,
-            "approval_status": r[0].approval_status.value,
+            "approval_status": r[0].approval_status.value if hasattr(r[0].approval_status, "value") else str(r[0].approval_status),
             "registration_version": r[0].registration_version,
-            "owner_id": r[0].owner_id,
+            "owner_id": str(r[0].owner_id),
             "owner_name": r[1],
             "owner_email": r[2],
-            "submitted_at": r[0].created_at,
+            "submitted_at": r[3],
+            "reviewed_at": r[4],
         }
         for r in rows
     ]
@@ -218,8 +253,8 @@ async def get_garage_registration_detail(
 
     # Coordinates
     coords_q = select(
-        ST_Y(Garage.location.cast(func.geometry())),
-        ST_X(Garage.location.cast(func.geometry())),
+        ST_Y(Garage.location.cast(Geometry)),
+        ST_X(Garage.location.cast(Geometry)),
     ).where(Garage.id == garage.id)
     coord_row = (await db.execute(coords_q)).first()
     lat = float(coord_row[0]) if coord_row and coord_row[0] is not None else 0.0
@@ -352,6 +387,26 @@ async def decide_garage_registration(
         reason=dto.rejection_reason,
     )
 
+    approved = dto.decision == "APPROVE"
+    await notify_user(
+        db=db,
+        user_id=garage.owner_id,
+        notification_type=(
+            NotificationType.REGISTRATION_APPROVED
+            if approved
+            else NotificationType.REGISTRATION_REJECTED
+        ),
+        title="Garage registration approved" if approved else "Garage registration rejected",
+        message=(
+            f"Your garage \"{garage.name}\" has been approved and is now publicly visible."
+            if approved
+            else f"Your garage \"{garage.name}\" was rejected. Reason: {dto.rejection_reason}"
+        ),
+        related_entity_type="GARAGE",
+        related_entity_id=garage.id,
+        also_email=True,
+    )
+
     await db.flush()
 
     from app.schemas.garage_registration import LatestDecisionBrief
@@ -462,6 +517,26 @@ async def decide_profile_change_request(
             reason=dto.rejection_reason,
         )
 
+    approved = dto.decision == "APPROVE"
+    await notify_user(
+        db=db,
+        user_id=req.submitted_by,
+        notification_type=(
+            NotificationType.PROFILE_CHANGE_APPROVED
+            if approved
+            else NotificationType.PROFILE_CHANGE_REJECTED
+        ),
+        title="Profile change approved" if approved else "Profile change rejected",
+        message=(
+            "Your requested garage profile changes have been applied."
+            if approved
+            else f"Your requested garage profile changes were rejected. Reason: {dto.rejection_reason}"
+        ),
+        related_entity_type="GARAGE_PROFILE_CHANGE_REQUEST",
+        related_entity_id=req.id,
+        also_email=True,
+    )
+
     await db.flush()
     return ProfileChangeRequestResponse.model_validate(req)
 
@@ -541,6 +616,24 @@ async def moderate_garage(
             target_id=garage.id,
             reason=dto.reason,
         )
+
+    suspended = dto.action == "SUSPEND"
+    await notify_user(
+        db=db,
+        user_id=garage.owner_id,
+        notification_type=(
+            NotificationType.GARAGE_SUSPENDED if suspended else NotificationType.GARAGE_RESTORED
+        ),
+        title="Garage suspended" if suspended else "Garage restored",
+        message=(
+            f"Your garage \"{garage.name}\" has been suspended. Reason: {dto.reason}"
+            if suspended
+            else f"Your garage \"{garage.name}\" has been restored and is visible again."
+        ),
+        related_entity_type="GARAGE",
+        related_entity_id=garage.id,
+        also_email=True,
+    )
 
     await db.flush()
 
@@ -684,6 +777,24 @@ async def update_user_status(
         target_id=user.id,
         reason=dto.reason,
     )
+
+    suspended = dto.status == AccountStatus.SUSPENDED
+    await notify_user(
+        db=db,
+        user_id=user.id,
+        notification_type=(
+            NotificationType.ACCOUNT_SUSPENDED if suspended else NotificationType.ACCOUNT_RESTORED
+        ),
+        title="Account suspended" if suspended else "Account restored",
+        message=(
+            f"Your account has been suspended. Reason: {dto.reason}"
+            if suspended
+            else "Your account has been restored."
+        ),
+        related_entity_type="USER",
+        related_entity_id=user.id,
+        also_email=True,
+    )
     await db.flush()
 
 
@@ -807,6 +918,21 @@ async def decide_review_report(
             target_id=report.id,
             reason=dto.note,
         )
+
+    removed = dto.decision == "REMOVE_REVIEW"
+    await notify_user(
+        db=db,
+        user_id=report.reporter_id,
+        notification_type=NotificationType.REVIEW_REPORT_RESOLVED,
+        title="Review report resolved",
+        message=(
+            "The review you reported has been removed."
+            if removed
+            else "The review you reported was reviewed and left in place."
+        ),
+        related_entity_type="REVIEW_REPORT",
+        related_entity_id=report.id,
+    )
 
     await db.flush()
 

@@ -4,10 +4,12 @@ Public Garage Endpoints (/garages/{garage_id}).
 from __future__ import annotations
 
 import uuid
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.deps import get_optional_user
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.enums import AnalyticsEventType
 from app.models.user import User
@@ -85,7 +87,9 @@ async def get_public_photos(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Record profile view analytics event (debounced, non-blocking)",
 )
+@limiter.limit(settings.RATE_LIMIT_ANALYTICS)
 async def record_profile_view(
+    request: Request,
     garage_id: uuid.UUID,
     current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
@@ -106,7 +110,9 @@ async def record_profile_view(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Record call button click event (opens tel: immediately on frontend)",
 )
+@limiter.limit(settings.RATE_LIMIT_ANALYTICS)
 async def record_call_click(
+    request: Request,
     garage_id: uuid.UUID,
     current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
