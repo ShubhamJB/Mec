@@ -44,9 +44,15 @@ class RoadsideCapabilityUpdate(BaseModel):
         return self
 
 
-class RoadsideCapabilityRead(RoadsideCapabilityUpdate):
+class RoadsideCapabilityRead(BaseModel):
     id: uuid.UUID
     garage_id: uuid.UUID
+    enabled: bool
+    is_available: bool
+    service_radius_km: int
+    availability_note: str | None = None
+    callback_phone: str | None = None
+    response_minutes: int
     created_at: datetime
     updated_at: datetime
 

@@ -278,8 +278,88 @@ async def seed() -> None:
                 ).scalars().all()
                 for user in users:
                     user.password_hash = password_hash
-                await session.commit()
-            print("Seed data already present; existing rows were kept.")
+            if existing_owner is not None:
+                demo_garage = (
+                    await session.execute(
+                        select(Garage).where(Garage.owner_id == existing_owner.id)
+                    )
+                ).scalar_one_or_none()
+                if demo_garage is not None:
+                    demo_garage.approval_status = ApprovalStatus.APPROVED
+                    demo_garage.is_suspended = False
+                    demo_garage.location = point_from_coords(27.7172, 85.3240)
+                    demo_garage.timezone = derive_timezone(27.7172, 85.3240)
+                    capability = (
+                        await session.execute(
+                            select(RoadsideCapability).where(
+                                RoadsideCapability.garage_id == demo_garage.id
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if capability is None:
+                        capability = RoadsideCapability(garage_id=demo_garage.id)
+                        session.add(capability)
+                    capability.enabled = True
+                    capability.is_available = True
+                    capability.service_radius_km = 25
+                    capability.availability_note = (
+                        "Seeded demo garage accepting roadside requests."
+                    )
+                    capability.callback_phone = demo_garage.phone
+                    capability.response_minutes = 15
+                    engine_diagnostics = (
+                        await session.execute(
+                            select(Service).where(
+                                func.lower(Service.name) == "engine diagnostics",
+                                Service.is_active.is_(True),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    electric_vehicle = (
+                        await session.execute(
+                            select(VehicleType).where(
+                                func.lower(VehicleType.name) == "electric vehicle",
+                                VehicleType.is_active.is_(True),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if engine_diagnostics is not None:
+                        has_service = (
+                            await session.execute(
+                                select(GarageService).where(
+                                    GarageService.garage_id == demo_garage.id,
+                                    GarageService.service_id == engine_diagnostics.id,
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if has_service is None:
+                            session.add(
+                                GarageService(
+                                    garage_id=demo_garage.id,
+                                    service_id=engine_diagnostics.id,
+                                )
+                            )
+                    if electric_vehicle is not None:
+                        has_vehicle_type = (
+                            await session.execute(
+                                select(GarageVehicleType).where(
+                                    GarageVehicleType.garage_id == demo_garage.id,
+                                    GarageVehicleType.vehicle_type_id == electric_vehicle.id,
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if has_vehicle_type is None:
+                            session.add(
+                                GarageVehicleType(
+                                    garage_id=demo_garage.id,
+                                    vehicle_type_id=electric_vehicle.id,
+                                )
+                            )
+            await session.commit()
+            print(
+                "Seed data already present; the owner0002 roadside demo was "
+                "updated for Kathmandu Electric Vehicle and Engine Diagnostics searches."
+            )
             if existing_admin:
                 print(f"  Admin user ID:        {existing_admin.id}")
                 print(f"  Admin login email:    {existing_admin.email}")
@@ -371,10 +451,16 @@ async def seed() -> None:
         }
 
         for index, owner in enumerate(owners, start=1):
-            city, base_lat, base_lng, spread = pick_city(rng)
-            latitude = round(base_lat + rng.uniform(-spread, spread), 6)
-            longitude = round(base_lng + rng.uniform(-spread, spread), 6)
+            if index == 2:
+                city, latitude, longitude = "Kathmandu", 27.7172, 85.3240
+            else:
+                city, base_lat, base_lng, spread = pick_city(rng)
+                latitude = round(base_lat + rng.uniform(-spread, spread), 6)
+                longitude = round(base_lng + rng.uniform(-spread, spread), 6)
             approval_status, is_suspended = pick_status(rng)
+            if index == 2:
+                approval_status = ApprovalStatus.APPROVED
+                is_suspended = False
             created_at = now - timedelta(days=rng.randint(10, 400))
             name = f"{rng.choice(NAME_HEADS)} {rng.choice(NAME_TAILS)}"
             phone = f"+97798{rng.randint(10000000, 99999999)}"
@@ -406,13 +492,16 @@ async def seed() -> None:
 
             garage_services = rng.sample(services, rng.randint(2, 6))
             garage_types = rng.sample(vehicle_types, rng.randint(1, 4))
+            if index == 2:
+                garage_services = services
+                garage_types = vehicle_types
             for service in garage_services:
                 session.add(GarageService(garage_id=garage.id, service_id=service.id))
             for vehicle_type in garage_types:
                 session.add(
                     GarageVehicleType(garage_id=garage.id, vehicle_type_id=vehicle_type.id)
                 )
-            if index == 2 and approval_status == ApprovalStatus.APPROVED and not is_suspended:
+            if index == 2:
                 session.add(
                     RoadsideCapability(
                         garage_id=garage.id,
