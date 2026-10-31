@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from fastapi import HTTPException
 from geoalchemy2 import Geometry
 from geoalchemy2.functions import ST_X, ST_Y, ST_Distance, ST_DWithin
@@ -31,6 +33,7 @@ from app.models.user import User
 from app.schemas.roadside import (
     EligibleGarage,
     EligibleGaragesResponse,
+    GuestRoadsideRequestStatusRead,
     RoadsideCapabilityRead,
     RoadsideCapabilityUpdate,
     RoadsideRequestCreate,
@@ -258,6 +261,32 @@ def _coarse_coordinate(value: float) -> float:
     return round((cell + 0.5) * COARSE_CELL_DEGREES, 4)
 
 
+async def _reverse_geocode(latitude: float, longitude: float) -> str | None:
+    """Resolve the already-coarsened request position to a human-readable area."""
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            response = await client.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": latitude, "lon": longitude, "format": "jsonv2", "zoom": 14},
+                headers={"User-Agent": "FindYourMechanic/1.0 roadside-location-label"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        address = payload.get("address", {})
+        nearby = next(
+            (address.get(key) for key in ("neighbourhood", "suburb", "quarter", "city_district", "borough", "district") if address.get(key)),
+            None,
+        )
+        city = next(
+            (address.get(key) for key in ("city", "town", "village", "municipality", "county") if address.get(key)),
+            None,
+        )
+        label = ", ".join(dict.fromkeys(part for part in (nearby, city) if part))
+        return label[:200] or None
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
 async def _event(
     db: AsyncSession,
     row: RoadsideRequest,
@@ -278,10 +307,10 @@ async def _event(
 
 
 async def create_request(
-    db: AsyncSession, customer: User, dto: RoadsideRequestCreate
+    db: AsyncSession, customer: User | None, dto: RoadsideRequestCreate
 ) -> RoadsideRequestRead:
     garage, _capability = await _validate_target(db, dto)
-    if garage.owner_id == customer.id:
+    if customer is not None and garage.owner_id == customer.id:
         raise HTTPException(
             status_code=403,
             detail="You cannot request roadside service from your own garage.",
@@ -295,22 +324,26 @@ async def create_request(
             "contact_phone": dto.contact_phone,
         }
     )
+    coarse_latitude = _coarse_coordinate(dto.latitude)
+    coarse_longitude = _coarse_coordinate(dto.longitude)
+    location_label = await _reverse_geocode(coarse_latitude, coarse_longitude)
     row = RoadsideRequest(
-        customer_id=customer.id,
+        customer_id=customer.id if customer else None,
         garage_id=garage.id,
         request_code=_request_code(),
         vehicle_type_id=dto.vehicle_type_id,
         service_id=dto.service_id,
         problem_description=dto.problem_description,
-        coarse_latitude=_coarse_coordinate(dto.latitude),
-        coarse_longitude=_coarse_coordinate(dto.longitude),
+        location_label=location_label,
+        coarse_latitude=coarse_latitude,
+        coarse_longitude=coarse_longitude,
         private_data_encrypted=encrypted,
         expires_at=now + REQUEST_TTL,
     )
     db.add(row)
     await db.flush()
     await db.refresh(row)
-    await _event(db, row, customer.id, None, RoadsideRequestStatus.PENDING)
+    await _event(db, row, customer.id if customer else None, None, RoadsideRequestStatus.PENDING)
     db.add(
         Notification(
             user_id=garage.owner_id,
@@ -349,6 +382,7 @@ async def _serialize(
         vehicle_type_id=row.vehicle_type_id,
         service_id=row.service_id,
         problem_description=row.problem_description,
+        location_label=row.location_label,
         coarse_latitude=row.coarse_latitude,
         coarse_longitude=row.coarse_longitude,
         exact_latitude=fields.get("latitude"),
@@ -456,6 +490,26 @@ async def get_request(
     return await _serialize(db, request, garage, reveal)
 
 
+async def get_guest_request_status(
+    db: AsyncSession, request_id: uuid.UUID, contact_phone: str
+) -> GuestRoadsideRequestStatusRead:
+    request, garage = await _request_with_garage(db, request_id)
+    private_data = decrypt_private_payload(request.private_data_encrypted)
+    if not secrets.compare_digest(str(private_data.get("contact_phone", "")), contact_phone.strip()):
+        raise _not_found()
+    await _expire_if_needed(db, request)
+    return GuestRoadsideRequestStatusRead(
+        request_code=request.request_code,
+        garage_name=garage.name,
+        status=request.status,
+        decline_reason=request.decline_reason,
+        quote_amount=request.quote_amount,
+        quote_currency=request.quote_currency,
+        eta_minutes=request.eta_minutes,
+        updated_at=request.updated_at,
+    )
+
+
 async def _transition(
     db: AsyncSession,
     row: RoadsideRequest,
@@ -518,16 +572,17 @@ async def owner_action(
         await _transition(
             db, request, owner_id, RoadsideRequestStatus.DECLINED, {"reason": safe_reason}
         )
-        db.add(
-            Notification(
-                user_id=request.customer_id,
-                title="Roadside request declined",
-                message=f"Garage {garage.name} cannot take request {request.request_code}.",
-                notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
-                related_entity_type="roadside_request",
-                related_entity_id=request.id,
+        if request.customer_id is not None:
+            db.add(
+                Notification(
+                    user_id=request.customer_id,
+                    title="Roadside request declined",
+                    message=f"Garage {garage.name} cannot take request {request.request_code}.",
+                    notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+                    related_entity_type="roadside_request",
+                    related_entity_id=request.id,
+                )
             )
-        )
     return await _serialize(
         db,
         request,
@@ -573,19 +628,20 @@ async def update_progress(
     if dto.eta_minutes is not None:
         request.eta_minutes = dto.eta_minutes
     await _transition(db, request, owner_id, dto.status, {})
-    db.add(
-        Notification(
-            user_id=request.customer_id,
-            title="Roadside request updated",
-            message=(
-                f"Request {request.request_code} is now "
-                f"{dto.status.value.lower().replace('_', ' ')}."
-            ),
-            notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
-            related_entity_type="roadside_request",
-            related_entity_id=request.id,
+    if request.customer_id is not None:
+        db.add(
+            Notification(
+                user_id=request.customer_id,
+                title="Roadside request updated",
+                message=(
+                    f"Request {request.request_code} is now "
+                    f"{dto.status.value.lower().replace('_', ' ')}."
+                ),
+                notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+                related_entity_type="roadside_request",
+                related_entity_id=request.id,
+            )
         )
-    )
     return await _serialize(
         db,
         request,

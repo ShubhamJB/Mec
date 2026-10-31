@@ -44,8 +44,8 @@ class RoadsideRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         sa.CheckConstraint("coarse_longitude BETWEEN -180 AND 180", name="ck_roadside_longitude"),
     )
 
-    customer_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     garage_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), sa.ForeignKey("garages.id", ondelete="RESTRICT"), nullable=False
@@ -66,6 +66,7 @@ class RoadsideRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UUID(as_uuid=True), sa.ForeignKey("services.id", ondelete="RESTRICT"), nullable=False
     )
     problem_description: Mapped[str] = mapped_column(sa.String(1000), nullable=False)
+    location_label: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
     coarse_latitude: Mapped[float] = mapped_column(sa.Float, nullable=False)
     coarse_longitude: Mapped[float] = mapped_column(sa.Float, nullable=False)
     private_data_encrypted: Mapped[str] = mapped_column(sa.Text, nullable=False)

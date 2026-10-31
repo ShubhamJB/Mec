@@ -150,11 +150,12 @@ class RoadsideRequestRead(BaseModel):
     request_code: str
     garage_id: uuid.UUID
     garage_name: str
-    customer_id: uuid.UUID
+    customer_id: uuid.UUID | None
     status: RoadsideRequestStatus
     vehicle_type_id: uuid.UUID
     service_id: uuid.UUID
     problem_description: str
+    location_label: str | None = None
     coarse_latitude: float
     coarse_longitude: float
     exact_latitude: float | None = None
@@ -169,3 +170,14 @@ class RoadsideRequestRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     events: list[RoadsideRequestEventRead] = Field(default_factory=list)
+
+
+class GuestRoadsideRequestStatusRead(BaseModel):
+    request_code: str
+    garage_name: str
+    status: RoadsideRequestStatus
+    decline_reason: str | None = None
+    quote_amount: Decimal | None = None
+    quote_currency: str | None = None
+    eta_minutes: int | None = None
+    updated_at: datetime

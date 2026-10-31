@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_customer, require_verified_owner
+from app.core.deps import get_optional_user, require_customer, require_verified_owner
+from app.models.enums import UserRole
 from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.roadside import (
     EligibleGaragesResponse,
+    GuestRoadsideRequestStatusRead,
     RoadsideCapabilityRead,
     RoadsideCapabilityUpdate,
     RoadsideRequestAction,
@@ -33,7 +35,6 @@ async def eligible_garages(
     vehicle_type_id: uuid.UUID = Query(...),
     service_id: uuid.UUID = Query(...),
     search_radius_km: int = Query(default=25, ge=1, le=100),
-    current_user: User = Depends(require_customer),
     db: AsyncSession = Depends(get_db),
 ) -> EligibleGaragesResponse:
     return await roadside_service.eligible_garages(
@@ -48,10 +49,27 @@ async def eligible_garages(
 async def create_request(
     request: Request,
     body: RoadsideRequestCreate,
-    current_user: User = Depends(require_customer),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> RoadsideRequestRead:
+    if current_user is not None and current_user.role != UserRole.CUSTOMER:
+        raise HTTPException(status_code=403, detail="Only customers can request roadside help.")
+    if current_user is not None and not current_user.email_verified:
+        raise HTTPException(status_code=403, detail="Verify your email or continue without signing in.")
     return await roadside_service.create_request(db, current_user, body)
+
+
+@customer_router.get(
+    "/requests/{request_id}/guest-status", response_model=GuestRoadsideRequestStatusRead
+)
+@limiter.limit("10/minute")
+async def guest_request_status(
+    request: Request,
+    request_id: uuid.UUID,
+    contact_phone: str = Query(..., min_length=9, max_length=16),
+    db: AsyncSession = Depends(get_db),
+) -> GuestRoadsideRequestStatusRead:
+    return await roadside_service.get_guest_request_status(db, request_id, contact_phone)
 
 
 @customer_router.get("/requests", response_model=list[RoadsideRequestRead])
