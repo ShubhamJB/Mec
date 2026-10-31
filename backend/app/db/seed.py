@@ -34,6 +34,7 @@ from app.models.enums import (
 from app.models.garage import Garage, GarageProfileChangeRequest, GarageRegistrationHistory
 from app.models.photo import GaragePhoto
 from app.models.review import Review, ReviewReport
+from app.models.roadside import RoadsideCapability
 from app.models.staff import GarageStaff
 from app.models.user import User
 from app.utils.geo import derive_timezone, point_from_coords
@@ -259,15 +260,37 @@ async def seed() -> None:
     city_timezones = {name: derive_timezone(lat, lng) for name, lat, lng, _, _ in CITIES}
 
     async with AsyncSessionLocal() as session:
-        existing = (
-            await session.execute(select(func.count(User.id)).where(User.email == ADMIN_EMAIL))
-        ).scalar_one()
+        existing_admin = (
+            await session.execute(select(User).where(User.email == ADMIN_EMAIL))
+        ).scalar_one_or_none()
+        existing_owner = (
+            await session.execute(select(User).where(User.email == f"owner0002@{EMAIL_DOMAIN}"))
+        ).scalar_one_or_none()
+        existing = existing_admin is not None
         if existing:
-            print(f"Seed data already present ({ADMIN_EMAIL} exists). Nothing to do.")
-            print(
-                "To start clean, remove this Compose project's pgdata volume "
-                "and recreate the db/api services; this preserves uploads."
-            )
+            # The Compose seed profile supplies a stable local password, so this command
+            # remains useful on an already-seeded developer database without duplicating data.
+            if password:
+                users = (
+                    await session.execute(
+                        select(User).where(User.email.like(f"%@{EMAIL_DOMAIN}"))
+                    )
+                ).scalars().all()
+                for user in users:
+                    user.password_hash = password_hash
+                await session.commit()
+            print("Seed data already present; existing rows were kept.")
+            if existing_admin:
+                print(f"  Admin user ID:        {existing_admin.id}")
+                print(f"  Admin login email:    {existing_admin.email}")
+            if existing_owner:
+                print(f"  Garage owner user ID: {existing_owner.id}")
+                print(f"  Garage owner login:   {existing_owner.email} (garage owner0002)")
+            if password:
+                print(f"  Shared password:      {password}")
+                print("  Password reset applied to all seeded accounts.")
+            else:
+                print("  No SEED_PASSWORD was set; existing passwords are unchanged and cannot be recovered.")
             return
 
         existing_services = {
@@ -388,6 +411,18 @@ async def seed() -> None:
             for vehicle_type in garage_types:
                 session.add(
                     GarageVehicleType(garage_id=garage.id, vehicle_type_id=vehicle_type.id)
+                )
+            if index == 2 and approval_status == ApprovalStatus.APPROVED and not is_suspended:
+                session.add(
+                    RoadsideCapability(
+                        garage_id=garage.id,
+                        enabled=True,
+                        is_available=True,
+                        service_radius_km=25,
+                        availability_note="Seeded demo garage accepting roadside requests.",
+                        callback_phone=phone,
+                        response_minutes=15,
+                    )
                 )
             session.add_all(build_hours(rng, garage.id))
 
@@ -604,10 +639,15 @@ async def seed() -> None:
     print(f"  audit log rows:    {counts['audit']}")
     print(f"  staff members:     {counts['staff']} ({counts['inactive_staff']} inactive)")
     print()
-    print(f"Admin login:  {ADMIN_EMAIL}")
-    print("Other logins: owner0001..owner0500 / customer0001..customer0200 @" + EMAIL_DOMAIN)
-    print(f"Password for every seeded account: {password}")
-    print("(set SEED_PASSWORD to choose your own; it is not stored anywhere else)")
+    demo_owner = owners[1]
+    print("Local demo credentials (all seeded accounts share this password):")
+    print(f"  Admin user ID:        {admin.id}")
+    print(f"  Admin login email:    {admin.email}")
+    print(f"  Garage owner user ID: {demo_owner.id}")
+    print(f"  Garage owner login:   {demo_owner.email} (garage owner0002)")
+    print(f"  Shared password:      {password}")
+    print("All other seeded owners/customers use the same password.")
+    print("Set SEED_PASSWORD in backend/.env to choose a predictable local password.")
 
 
 async def main() -> None:

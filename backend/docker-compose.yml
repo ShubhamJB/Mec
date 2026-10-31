@@ -44,6 +44,21 @@ services:
     depends_on:
       - api
 
+  seed:
+    build: .
+    profiles: ["tools"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-find_your_mechanic}
+      SYNC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-find_your_mechanic}
+      SEED_PASSWORD: ${SEED_PASSWORD:-MechaRoadside2026!}
+    command: ["python", "-m", "app.db.seed"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
   uploads:
