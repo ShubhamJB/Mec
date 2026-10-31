@@ -82,7 +82,20 @@ Suggested DTOs:
 
 Public photos endpoint is defined under public garage APIs only once.
 
-## 8. Discovery and search
+## 8. Private garage staff management — `/owner/staff`
+Staff are internal garage records, not user accounts. The garage owner is the only role that can access the roster and staff details. A garage can have zero staff; the owner may operate independently. Staff belong to one garage in this MVP. Identity for an operation is derived from the authenticated owner's garage, never from a client-supplied `garage_id`.
+
+| Method & path | Access | Input | Behavior / responses |
+|---|---|---|---|
+| GET `/owner/staff` | Verified owner | — | List all staff, including inactive records, for the owner's garage; return `[]` when the owner has no garage staff. Never expose this collection publicly. 200/401/403/404. |
+| POST `/owner/staff` | Verified owner | `full_name,phone,role_title?` | Create active staff record; full_name 2–100, phone E.164, role_title max 50. 201/401/403/404/422. |
+| GET `/owner/staff/{staff_id}` | Verified owner | Path id | Return only a staff record belonging to the owner's garage; otherwise 404. 200/401/403/404. |
+| PATCH `/owner/staff/{staff_id}` | Verified owner | `full_name?,phone?,role_title?,is_active?` | Update supplied fields; reject empty patch; preserve record. Owner-scoped; otherwise 404. 200/401/403/404/422. |
+| DELETE `/owner/staff/{staff_id}` | Verified owner | Path id | Deactivate (`is_active=false`) rather than hard-delete; owner-scoped. 200/401/403/404. |
+
+Staff DTO: `{id,garage_id,full_name,phone,role_title,is_active,created_at,updated_at}`. Responses are available only through owner routes. Do not add staff names or phone numbers to public garage cards, profiles, discovery, customer APIs, or public analytics. Staff are not independently authenticated in this initial CRUD scope.
+
+## 9. Discovery and search
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | GET `/garages/nearby` | Public | latitude,longitude; optional search, service_ids[], vehicle_type_ids[], open_now | Apply filters first; search 5 km; if fewer than 3 matching garages expand to 10 km; return up to 3 nearest. Keep original origin regardless of map pan. 200/422. |
@@ -90,7 +103,7 @@ Public photos endpoint is defined under public garage APIs only once.
 
 Use shared discovery query logic for map and list. Public eligibility: approved, not garage-suspended, not deleted, owner ACTIVE. Active catalog entries only. Nearby returns max 3; listing paginates 10.
 
-## 9. Public garage and analytics APIs
+## 10. Public garage and analytics APIs
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | GET `/garages/{garage_id}` | Public | Path id | Public profile: name, description, phone, address, coordinates, timezone, rating/count, availability, services, vehicle types, hours, photos, created_at. 200/404. |
@@ -100,7 +113,7 @@ Use shared discovery query logic for map and list. Public eligibility: approved,
 | POST `/garages/{garage_id}/analytics/profile-view` | Public, optional auth | No body | Record PROFILE_VIEW; optional customer ID from JWT; dedup/rate-limit refresh inflation; frontend must not block profile. 202/404/429. |
 | POST `/garages/{garage_id}/analytics/call-click` | Public, optional auth | No body | Record CALL_CLICK; frontend opens tel: immediately. Click is not confirmed call. 202/404/429. |
 
-## 10. Customer reviews
+## 11. Customer reviews
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | POST `/garages/{garage_id}/reviews` | Verified active customer | `rating` required, `comment?` | Rating integer 1–5; comment optional/null max 2000; cannot review own garage; garage must be public-eligible; temporary unavailable/closed does not block; one active published review. 201/401/403/404/409/422. |
@@ -111,7 +124,7 @@ Use shared discovery query logic for map and list. Public eligibility: approved,
 
 Review DTO: `{id,customer:{display_name},rating,comment,created_at,updated_at}`. Never return email/phone/private account details. No owner reply. Admin-removed reviews cannot be edited/restored.
 
-## 11. Owner dashboard and analytics
+## 12. Owner dashboard and analytics
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | GET `/owner/dashboard` | Owner | — | Garage summary, approval/availability, views, call clicks, average rating, review count. 200/401/403/404. |
@@ -122,7 +135,7 @@ Review DTO: `{id,customer:{display_name},rating,comment,created_at,updated_at}`.
 
 Garage identity derives from authenticated owner, never arbitrary client-supplied garage ID.
 
-## 12. Admin APIs
+## 13. Admin APIs
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | GET `/admin/dashboard` | Admin | — | Counts of users, garages/statuses, reviews, pending reports, call clicks. 200/401/403. |
@@ -142,7 +155,7 @@ Garage identity derives from authenticated owner, never arbitrary client-supplie
 | PATCH `/admin/review-reports/{report_id}` | Admin | decision DISMISS/REMOVE_REVIEW,note | Note required; removal marks review REMOVED, excludes rating, blocks author edit/restore; audit and notify reporter. 200/401/403/404/409/422. |
 | GET `/admin/audit-logs` | Admin | admin_id?,action_type?,date range,page,limit | Append-only audit list. 200/401/403/422. |
 
-## 13. Notifications — `/notifications`
+## 14. Notifications — `/notifications`
 | Method & path | Access | Input | Behavior / responses |
 |---|---|---|---|
 | GET `/notifications` | Authenticated | page=1,limit=20 max 50,is_read? | Always filter by authenticated user. 200/401/422. |
@@ -151,14 +164,14 @@ Garage identity derives from authenticated owner, never arbitrary client-supplie
 | PATCH `/notifications/read-all` | Authenticated | — | Mark own notifications read; return updated_count. 200/401. |
 | DELETE `/notifications/{notification_id}` | Authenticated | Path id | Delete own notification only. 200/401/404. |
 
-## 14. DTO examples
+## 15. DTO examples
 **Garage card:** `{id,name,latitude,longitude,distance_km,average_rating,review_count,availability,phone,cover_photo_url}`
 
 **Availability:** `{status:"OPEN|CLOSED|TEMPORARILY_UNAVAILABLE",is_temporarily_unavailable,message?,timezone,local_time,next_status_change?}`
 
 **Review:** `{id,customer:{display_name},rating,comment,created_at,updated_at}`
 
-## 15. Engineering decisions to finalize before implementation
+## 16. Engineering decisions to finalize before implementation
 - JWT access/refresh lifetimes, password policy and auth rate limits.
 - Exact pagination maxima and query parameter array serialization.
 - Profile-view/call-click deduplication and abuse prevention.
@@ -166,3 +179,52 @@ Garage identity derives from authenticated owner, never arbitrary client-supplie
 - Email provider and notification outbox/retry strategy.
 - Exact Pydantic field nullability and enum values.
 - Decide whether `/garages/nearby` is a wrapper over shared discovery query logic (recommended).
+
+### Technical plan: remote roadside assistance (not implemented)
+The first release is a customer-initiated, garage-owner-managed request. The customer selects a nearby eligible garage, shares a problem summary and approximate location, and sends a request. The garage owner accepts or declines; acceptance unlocks the customer's contact/location details and prompts the owner to call and confirm the problem, price, and response estimate. A request does not promise dispatch or a fixed arrival time.
+
+#### Product decisions to lock before coding
+- Define supported service area and whether matching uses a garage-set radius, customer-selected radius, or both. A proposed default is a garage-configured radius capped by the customer's search radius.
+- Require explicit roadside opt-in, availability status, service radius, supported vehicle types/services, operating window, and a phone number for callbacks. Normal garage hours and profile visibility do not imply roadside readiness.
+- Define response expectation, request expiry, cancellation rules, rate limits, and what the customer sees while waiting. Keep price and ETA as owner-confirmed estimates, not guarantees.
+- Before acceptance show only a coarse location (for example a map cell/approximate distance), problem summary, vehicle category, and callback availability. Reveal exact coordinates/address and phone only after acceptance.
+- Confirm staff participation is out of scope initially: the garage owner receives and manages requests, and can coordinate with staff offline. Later assignment should reference `garage_staff` while retaining owner authorization.
+- Decide abuse reporting, emergency guidance, support ownership, and retention/deletion policy for sensitive location/contact data.
+
+#### Proposed data model
+- `roadside_capabilities`: one-to-one with garage; `enabled`, `is_available`, `service_radius_km`, optional availability note, and timestamps. Keep operational availability separate from normal hours and temporary garage unavailability.
+- `roadside_requests`: UUID, customer and garage foreign keys, server-generated public request code, status, vehicle type, problem description, coarse location snapshot, encrypted exact latitude/longitude and contact snapshot, optional owner-confirmed quote/ETA, expiry and lifecycle timestamps, created/updated timestamps.
+- `roadside_request_events`: append-only transition/audit trail with request, actor, from/to status, timestamp and safe metadata. Avoid copying secret contact/location into events.
+- Index active requests by garage/status/created time, customer/status/created time, and use PostGIS geography for eligible-garage radius matching. Add idempotency key per customer submission to prevent duplicate requests.
+- Keep new entities in dedicated tables/migration; do not overload analytics events, availability fields, or staff rows.
+
+#### Lifecycle and API proposal
+`PENDING → ACCEPTED → CONTACTED → CONFIRMED → IN_PROGRESS → COMPLETED`, with alternate terminal states `DECLINED`, `EXPIRED`, `CANCELLED`, and `UNABLE_TO_SERVE`. Enforce transitions server-side with a conditional update/version check; only the customer can cancel before work begins, and only the assigned garage owner can accept/decline/update service progress. Define transition deadlines before implementation.
+
+| Method & path | Access | Purpose |
+|---|---|---|
+| GET `/roadside/eligible-garages` | Active customer | Filter approved, non-suspended garages with roadside enabled/available and compatible vehicle/service, by radius and distance. Return only public garage details, approximate distance, availability and callback expectation. |
+| POST `/roadside/requests` | Active customer | Create pending request for one eligible garage with vehicle, problem, location and callback phone; validate consent, radius, size and rate limits; return safe summary and expiry. |
+| GET `/roadside/requests` | Active customer / garage owner | List only caller's own requests or requests for the owner's garage; redact exact location/phone until accepted. |
+| GET `/roadside/requests/{id}` | Participating customer / garage owner | Return lifecycle detail; reveal sensitive fields only to the customer and accepted garage owner. |
+| POST `/owner/roadside/requests/{id}/accept` | Garage owner | Atomically accept one still-pending, unexpired request and unlock contact/location. |
+| POST `/owner/roadside/requests/{id}/decline` | Garage owner | Decline with a controlled reason; customer gets a status update and can contact another garage. |
+| PATCH `/owner/roadside/requests/{id}` | Garage owner | Record contacted/confirmed/in-progress/completed/unable-to-serve and optional confirmed quote/ETA. |
+| POST `/roadside/requests/{id}/cancel` | Requesting customer | Cancel before work begins; idempotent and audited. |
+| PATCH `/owner/roadside/capability` | Garage owner | Set opt-in, availability, radius and callback expectations; reject unsupported ranges. |
+
+#### Delivery, privacy and frontend sequence
+- Persist request and an outbox notification in one transaction; deliver push/email/SMS asynchronously with retry, deduplication and delivery status. Do not depend on a browser session being open. Start with in-app polling/refresh plus delivery fallback; consider WebSockets only if latency needs justify operating them.
+- Customer flow: permissioned location or manual pin → eligible list → one garage request → pending state with cancel/expiry → accepted state with callback instructions → confirmed status and owner estimate → completion/cancelled history.
+- Owner flow: explicit roadside availability setup → incoming request queue → safe preview → accept/decline → call customer → record confirmation, quote and ETA → progress/completion.
+- Store precise location/contact only as long as required by the request and retention policy; redact from logs, analytics, admin summaries and push payloads. Encrypt at rest where supported and never expose it to other garages or public discovery.
+- Add metrics for eligible results, requests, response time, accept/decline/expiry, cancellations and completion, without sensitive data.
+
+#### Implementation order and acceptance checks
+1. Finalize coverage, timing, cancellation, privacy and support decisions; approve request state diagram and payload redaction matrix.
+2. Add migrations/models/schemas, geospatial candidate query, capabilities endpoint, state transition service and audit/outbox handling.
+3. Add customer eligible-garage/request/history UI, then owner capability/queue/detail/action UI; show clear loading, empty, offline, expiry, retry and permission-denied states.
+4. Add delivery worker/provider integration and operational controls; keep manual refresh/polling as a fallback.
+5. Verify role/ownership isolation, pre/post-acceptance redaction, race-safe single acceptance, expiry/cancel boundaries, idempotent creation/transitions, matching radius/filter behavior, notification retries, and mobile/location-permission edge cases.
+
+This is a planning artifact only; no roadside schema, routes or UI should be treated as implemented. Do not infer roadside availability from normal operating hours.

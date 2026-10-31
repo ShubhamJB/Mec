@@ -42,3 +42,5 @@ alembic/versions/*.pyc
 # macOS
 .DS_Store
 
+# Local uploads
+uploads/

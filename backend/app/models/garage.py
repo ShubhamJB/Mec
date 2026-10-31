@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from geoalchemy2 import Geography
@@ -14,12 +15,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import ApprovalStatus, RegistrationHistoryStatus
 
+if TYPE_CHECKING:
+    from app.models.catalog import GarageService, GarageVehicleType, OperatingHours
+    from app.models.photo import GaragePhoto
+    from app.models.staff import GarageStaff
+
 
 class Garage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "garages"
 
     owner_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        sa.ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(sa.String(150), nullable=False)
     description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
@@ -52,7 +61,9 @@ class Garage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "User", back_populates="garage", foreign_keys=[owner_id]
     )
     registration_history: Mapped[list["GarageRegistrationHistory"]] = relationship(
-        "GarageRegistrationHistory", back_populates="garage", order_by="GarageRegistrationHistory.submitted_at"
+        "GarageRegistrationHistory",
+        back_populates="garage",
+        order_by="GarageRegistrationHistory.submitted_at",
     )
     operating_hours: Mapped[list["OperatingHours"]] = relationship(
         "OperatingHours", back_populates="garage", order_by="OperatingHours.day_of_week"
@@ -69,11 +80,14 @@ class Garage(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     profile_change_requests: Mapped[list["GarageProfileChangeRequest"]] = relationship(
         "GarageProfileChangeRequest", back_populates="garage"
     )
-    garage_services: Mapped[list["GarageService"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    garage_services: Mapped[list["GarageService"]] = relationship(
         "GarageService", back_populates="garage"
     )
-    garage_vehicle_types: Mapped[list["GarageVehicleType"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    garage_vehicle_types: Mapped[list["GarageVehicleType"]] = relationship(
         "GarageVehicleType", back_populates="garage"
+    )
+    staff: Mapped[list["GarageStaff"]] = relationship(
+        "GarageStaff", back_populates="garage"
     )
 
     def __repr__(self) -> str:
@@ -99,7 +113,7 @@ class GarageRegistrationHistory(Base, UUIDPrimaryKeyMixin):
         nullable=False,
     )
     # Immutable JSONB snapshot of submitted fields
-    submission_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    submission_data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     rejection_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
@@ -142,7 +156,7 @@ class GarageProfileChangeRequest(Base, UUIDPrimaryKeyMixin):
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    proposed_changes: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    proposed_changes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(
         sa.String(20), default="PENDING", nullable=False, index=True
     )

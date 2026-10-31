@@ -3,33 +3,34 @@ Centralised model imports — import from here everywhere else.
 This ensures all models are registered with SQLAlchemy metadata
 before Alembic autogenerate runs.
 """
-from app.models.user import User
-from app.models.garage import Garage, GarageRegistrationHistory, GarageProfileChangeRequest
+from app.models.analytics import AdminAction, AnalyticsEvent
 from app.models.catalog import (
-    Service,
     GarageService,
-    VehicleType,
     GarageVehicleType,
     OperatingHours,
+    Service,
+    VehicleType,
 )
-from app.models.photo import GaragePhoto
-from app.models.review import Review, ReviewReport
-from app.models.notification import Notification
-from app.models.analytics import AnalyticsEvent, AdminAction
-from app.models.token import RefreshToken, EmailVerificationToken
 from app.models.enums import (
-    UserRole,
     AccountStatus,
-    ApprovalStatus,
-    RegistrationHistoryStatus,
-    ReviewStatus,
-    ReviewReportReason,
-    ReviewReportStatus,
+    AdminActionType,
     AnalyticsEventType,
+    ApprovalStatus,
     NotificationType,
     ProfileChangeRequestStatus,
-    AdminActionType,
+    RegistrationHistoryStatus,
+    ReviewReportReason,
+    ReviewReportStatus,
+    ReviewStatus,
+    UserRole,
 )
+from app.models.garage import Garage, GarageProfileChangeRequest, GarageRegistrationHistory
+from app.models.notification import Notification
+from app.models.photo import GaragePhoto
+from app.models.review import Review, ReviewReport
+from app.models.staff import GarageStaff
+from app.models.token import EmailVerificationToken, RefreshToken
+from app.models.user import User
 
 __all__ = [
     "User",
@@ -49,6 +50,7 @@ __all__ = [
     "AdminAction",
     "RefreshToken",
     "EmailVerificationToken",
+    "GarageStaff",
     "UserRole",
     "AccountStatus",
     "ApprovalStatus",

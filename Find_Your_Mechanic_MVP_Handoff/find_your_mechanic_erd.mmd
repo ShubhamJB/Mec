@@ -19,6 +19,7 @@ erDiagram
     USERS ||--o{ REFRESH_TOKENS : owns
     USERS ||--o{ EMAIL_VERIFICATION_TOKENS : verifies
     GARAGES ||--o{ GARAGE_PROFILE_CHANGE_REQUESTS : requests
+    GARAGES ||--o{ GARAGE_STAFF : has_private_staff
     USERS ||--o{ GARAGE_PROFILE_CHANGE_REQUESTS : submits
     USERS o|--o{ GARAGE_PROFILE_CHANGE_REQUESTS : reviews
 
@@ -186,4 +187,14 @@ erDiagram
       uuid reviewed_by FK
       timestamptz submitted_at
       timestamptz reviewed_at
+    }
+    GARAGE_STAFF {
+      uuid id PK
+      uuid garage_id FK
+      string full_name
+      string phone
+      string role_title
+      boolean is_active
+      timestamptz created_at
+      timestamptz updated_at
     }

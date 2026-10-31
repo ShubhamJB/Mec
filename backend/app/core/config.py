@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "Find Your Mechanic"
 
     # ── Storage ───────────────────────────────────────────────────────────────
-    STORAGE_PROVIDER: Literal["stub", "s3", "gcs", "cloudinary"] = "stub"
+    STORAGE_PROVIDER: Literal["stub", "local", "s3", "gcs", "cloudinary"] = "stub"
+    UPLOAD_DIR: str = "uploads"
+    MEDIA_URL_PREFIX: str = "/api/v1/media"
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "ap-southeast-1"

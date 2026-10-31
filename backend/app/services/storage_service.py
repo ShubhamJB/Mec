@@ -4,8 +4,10 @@ Easily swappable with S3, Cloudinary, GCS, or Supabase.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
+from pathlib import Path
 from typing import Protocol
 
 from app.core.config import settings
@@ -54,8 +56,52 @@ class StubStorageService:
         return True
 
 
+IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+class LocalStorageService:
+    """
+    Saves files to a directory on disk and serves them through the API's /media mount.
+    Intended for development and single-node deployments.
+    """
+
+    def __init__(self, root: Path, public_prefix: str):
+        self.root = root
+        self.public_prefix = public_prefix.rstrip("/")
+
+    async def upload_file(
+        self,
+        *,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+    ) -> tuple[str, str]:
+        extension = IMAGE_EXTENSIONS.get(content_type, ".bin")
+        storage_key = f"garages/{uuid.uuid4()}{extension}"
+        destination = self.root / storage_key
+        await asyncio.to_thread(self._write, destination, file_bytes)
+        return f"{self.public_prefix}/{storage_key}", storage_key
+
+    async def delete_file(self, *, storage_key: str) -> bool:
+        target = (self.root / storage_key).resolve()
+        if not target.is_relative_to(self.root.resolve()):
+            return False
+        await asyncio.to_thread(target.unlink, True)
+        return True
+
+    @staticmethod
+    def _write(destination: Path, data: bytes) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+
+
 def get_storage_service() -> StorageProvider:
-    # Switch on settings.STORAGE_PROVIDER if S3 / Cloudinary added later
+    if settings.STORAGE_PROVIDER == "local":
+        return LocalStorageService(Path(settings.UPLOAD_DIR), settings.MEDIA_URL_PREFIX)
     return StubStorageService()
 
 

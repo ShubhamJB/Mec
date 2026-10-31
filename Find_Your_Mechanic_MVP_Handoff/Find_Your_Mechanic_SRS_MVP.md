@@ -31,6 +31,7 @@ Goals:
 - Public reviews, customer review management and reports.
 - Owner dashboard and analytics.
 - Admin moderation and in-app/email notifications.
+- Optional private garage staff management: an owner may operate alone or maintain staff records; staff are not public accounts or public profile data.
 
 ### Excluded
 In-app messaging, booking, payments, quotations, job tracking, owner review replies, verified-service reviews, formal in-app suspension appeals, multiple branches per owner, advanced identity/business verification and advanced analytics.
@@ -56,6 +57,7 @@ In-app messaging, booking, payments, quotations, job tracking, owner review repl
 18. **Notifications:** In-app/email for verification, registration and critical profile decisions, garage/account suspension/restoration; in-app for review received, report submission to admins and report resolution to reporter.
 19. **Owner suspension:** Suspended owner hides their garage automatically without changing the garage's independent suspension flag. Restoring owner restores visibility only if garage is otherwise eligible.
 20. **Customer suspension:** Suspended customer cannot authenticate or act on reviews; existing published reviews remain visible and count.
+21. **Garage staff:** A garage owner may manage zero or more staff members. Staff are optional; the owner can operate the garage alone. Staff records are private to the owning garage owner and never appear in public/customer APIs. Deactivation preserves the record for future work history; no hard delete.
 
 ## 6. Business rules
 | Area | Rule |
@@ -71,6 +73,7 @@ In-app messaging, booking, payments, quotations, job tracking, owner review repl
 | Rating | Average/distribution derived from active published reviews. |
 | Suspension | Independent from registration approval and temporary availability. |
 | Reviews | Partial unique index for active published review; deleted/removed history retained. |
+| Garage staff | Optional, single-garage records; owner-only access; deactivate rather than hard-delete. |
 | Registration history | Immutable snapshot per submission; pending edits update current garage and version. |
 
 ## 7. Non-functional requirements
@@ -112,6 +115,11 @@ Verified active customer submits rating and optional comment. Customer can edit 
 - Rating-only reviews work; suspended customers cannot change reviews; their existing published reviews still count.
 - Temporary unavailability overrides hours and may display an optional message.
 - Owner review DTO exposes display name only, not private account data.
+- Garage owners can create, view, update, deactivate, and list staff for their own garage; a garage with zero staff remains valid and operates under its owner.
+- Customers and visitors cannot access staff collection or detail endpoints, and public garage responses contain no staff data.
 
 ## 10. Open implementation decisions
 Engineering must finalize profile-view/call-click deduplication and rate limits, JWT/refresh expiry, password policy, exact pagination limits, email provider, cloud storage provider and notification retry/outbox strategy. These are implementation details not yet fixed as product requirements.
+
+### Future product direction: roadside assistance
+Roadside assistance is a separate follow-on feature, not part of the staff CRUD implementation. The proposed first workflow is a customer request to an explicitly roadside-ready garage, followed by owner acceptance and a phone callback to confirm the problem, price, and response. Regular garage hours do not imply roadside availability. Exact location and customer phone should remain hidden from the garage until acceptance. Matching coverage, response expectations, service radius, request lifecycle, cancellation, pricing, safety, and support responsibilities require product validation before implementation.

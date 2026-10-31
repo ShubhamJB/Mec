@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 from geoalchemy2 import Geometry
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_X, ST_Y
-from sqlalchemy import case, func, null, select
+from sqlalchemy import case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.catalog import (
@@ -116,10 +116,11 @@ def _build_base_discovery_query(
         )
     )
 
-    # Search by garage name
     if search and search.strip():
         term = f"%{search.strip().lower()}%"
-        query = query.where(func.lower(Garage.name).like(term))
+        query = query.where(
+            or_(func.lower(Garage.name).like(term), func.lower(Garage.address).like(term))
+        )
 
     # Multi-select services (ANY within group)
     if service_ids:

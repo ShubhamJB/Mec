@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     owner_garage,
     owner_garage_registration,
     owner_photos,
+    owner_staff,
     reviews,
     users,
 )
@@ -43,6 +44,7 @@ api_router.include_router(
 # Garage Profile & Management (Owner)
 api_router.include_router(owner_garage.router, prefix="/owner", tags=["owner-garage"])
 api_router.include_router(owner_photos.router, prefix="/owner", tags=["owner-photos"])
+api_router.include_router(owner_staff.router, prefix="/owner", tags=["owner-staff"])
 api_router.include_router(owner_analytics.router, prefix="/owner", tags=["owner-analytics"])
 
 # Catalogs

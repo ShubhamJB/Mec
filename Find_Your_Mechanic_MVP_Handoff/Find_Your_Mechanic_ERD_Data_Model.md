@@ -1,5 +1,5 @@
 # Find Your Mechanic — ERD and Database Design
-**Version 1.0 | PostgreSQL + PostGIS | 17 core entities**
+**Version 1.1 | PostgreSQL + PostGIS | 18 core entities**
 
 ## Conventions
 - UUID primary keys; timestamps are `timestamptz` UTC.
@@ -8,7 +8,7 @@
 - Public OPEN/CLOSED state is derived, not stored as authoritative state.
 - Use `ON DELETE RESTRICT` for history-bearing records; do not cascade-delete reviews or audit logs.
 
-## Core entities (17)
+## Core entities (18)
 1. **users** — id, full_name, normalized unique email, password_hash, role, email_verified, account_status, created_at, updated_at, deleted_at.
 2. **garages** — id, owner_id, name, description, E.164 phone, address, location, timezone, approval_status, is_suspended, is_temporarily_unavailable, temporary_unavailability_message (varchar 300 nullable), registration_version, timestamps, deleted_at.
 3. **garage_registration_history** — id, garage_id, reviewed_by nullable, status, submitted_at, reviewed_at, rejection_reason, submission_data JSONB immutable snapshot.
@@ -26,10 +26,12 @@
 15. **refresh_tokens** — id, user_id, token_hash, expires_at, revoked_at, created_at, device_info.
 16. **email_verification_tokens** — id, user_id, token_hash, expires_at, used_at, revoked_at, created_at.
 17. **garage_profile_change_requests** — id, garage_id, submitted_by, proposed_changes JSONB, status, rejection_reason, reviewed_by, submitted_at, reviewed_at.
+18. **garage_staff** — id, garage_id, full_name, E.164 phone, optional role_title, is_active, created_at, updated_at. A private optional roster owned by one garage; staff may not belong to multiple garages in this MVP.
 
 ## Relationships
 - User owns 0..1 non-deleted garage; soft-deleted historical rows may remain.
 - Garage has many registration history rows, hours, photos, reviews, analytics events and profile change requests.
+- Garage may have zero or many staff rows. Staff are internal records managed only by the owning garage owner; public/customer responses never expose them. An owner-only garage remains valid with no staff.
 - Garage↔services and garage↔vehicle types are many-to-many via junction tables.
 - User authors reviews, reports, notifications, sessions and verification tokens.
 - Review has many reports; one report per reporter/review.
@@ -57,6 +59,9 @@ ON operating_hours(garage_id, day_of_week);
 CREATE UNIQUE INDEX uq_active_photo_order
 ON garage_photos(garage_id, display_order)
 WHERE deleted_at IS NULL;
+
+CREATE INDEX ix_garage_staff_garage_id
+ON garage_staff(garage_id);
 ```
 Catalog normalized name uniqueness should use a normalized column or unique index on `lower(trim(name))`; normalize repeated whitespace in application logic.
 
@@ -69,7 +74,9 @@ Catalog normalized name uniqueness should use a normalized column or unique inde
 - `storage_key` is required for cloud photo deletion; URL alone is insufficient.
 - The partial review unique index allows a new review after customer deletion or admin removal while retaining old rows.
 - Catalog deactivation must transactionally ensure approved garages retain at least one active service/type.
-- Optional future reliability table: `notification_deliveries` or `outbox_events`; not included in the 17 core entities.
+- Optional future reliability table: `notification_deliveries` or `outbox_events`; not included in the 18 core entities.
+- Staff are deactivated with `is_active=false`, not hard-deleted, so future job assignments can retain their identity. Use a restrictive garage FK consistent with history-bearing data; garage removal is soft deletion.
+- Roadside request entities and roadside-readiness fields are intentionally not in this schema revision; roadside assistance needs a separate lifecycle and product decision pass.
 
 ## Mermaid source
 See `find_your_mechanic_erd.mmd` in this package.

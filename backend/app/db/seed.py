@@ -34,6 +34,7 @@ from app.models.enums import (
 from app.models.garage import Garage, GarageProfileChangeRequest, GarageRegistrationHistory
 from app.models.photo import GaragePhoto
 from app.models.review import Review, ReviewReport
+from app.models.staff import GarageStaff
 from app.models.user import User
 from app.utils.geo import derive_timezone, point_from_coords
 
@@ -136,14 +137,16 @@ NAME_TAILS = [
 
 FIRST_NAMES = [
     "Aarav", "Anil", "Bikash", "Binod", "Deepak", "Dipesh", "Ganesh", "Hari", "Kiran", "Krishna",
-    "Manish", "Nabin", "Prakash", "Rajesh", "Ramesh", "Roshan", "Sagar", "Sanjay", "Suresh", "Utsav",
+    "Manish", "Nabin", "Prakash", "Rajesh", "Ramesh", "Roshan", "Sagar", "Sanjay",
+    "Suresh", "Utsav",
     "Anita", "Asmita", "Bimala", "Gita", "Kabita", "Laxmi", "Mina", "Nisha", "Pooja", "Rita",
     "Sabina", "Sarita", "Sita", "Sunita", "Usha",
 ]
 
 LAST_NAMES = [
-    "Adhikari", "Gurung", "Karki", "Khadka", "Magar", "Neupane", "Pandey", "Poudel", "Rai", "Sharma",
-    "Shrestha", "Tamang", "Thapa", "Bhattarai", "Basnet", "Dahal", "Joshi", "Koirala", "Lama", "Maharjan",
+    "Adhikari", "Gurung", "Karki", "Khadka", "Magar", "Neupane", "Pandey", "Poudel", "Rai",
+    "Sharma", "Shrestha", "Tamang", "Thapa", "Bhattarai", "Basnet", "Dahal", "Joshi", "Koirala",
+    "Lama", "Maharjan",
 ]
 
 DESCRIPTIONS = [
@@ -261,7 +264,10 @@ async def seed() -> None:
         ).scalar_one()
         if existing:
             print(f"Seed data already present ({ADMIN_EMAIL} exists). Nothing to do.")
-            print("To start clean run: docker compose down -v && docker compose up --build")
+            print(
+                "To start clean, remove this Compose project's pgdata volume "
+                "and recreate the db/api services; this preserves uploads."
+            )
             return
 
         existing_services = {
@@ -330,8 +336,16 @@ async def seed() -> None:
         active_customers = [c for c in customers if c.account_status == AccountStatus.ACTIVE]
         public_garages: list[Garage] = []
         approved_garages: list[Garage] = []
+        garages: list[Garage] = []
         reviews: list[Review] = []
-        counts = {"photos": 0, "events": 0, "audit": 0, "pending_changes": 0}
+        counts = {
+            "photos": 0,
+            "events": 0,
+            "audit": 0,
+            "pending_changes": 0,
+            "staff": 0,
+            "inactive_staff": 0,
+        }
 
         for index, owner in enumerate(owners, start=1):
             city, base_lat, base_lng, spread = pick_city(rng)
@@ -365,6 +379,7 @@ async def seed() -> None:
             )
             session.add(garage)
             await session.flush()
+            garages.append(garage)
 
             garage_services = rng.sample(services, rng.randint(2, 6))
             garage_types = rng.sample(vehicle_types, rng.randint(1, 4))
@@ -383,7 +398,9 @@ async def seed() -> None:
                 else None
             )
             rejection_reason = (
-                rng.choice(REJECTION_REASONS) if approval_status == ApprovalStatus.REJECTED else None
+                rng.choice(REJECTION_REASONS)
+                if approval_status == ApprovalStatus.REJECTED
+                else None
             )
             session.add(
                 GarageRegistrationHistory(
@@ -538,10 +555,43 @@ async def seed() -> None:
                     event_total += 1
         counts["events"] = event_total
 
+        staff_roles = [
+            "Mechanic",
+            "Senior Mechanic",
+            "Auto Electrician",
+            "Service Technician",
+            "Service Advisor",
+        ]
+        for index, garage in enumerate(garages, start=1):
+            if index == 1:
+                staff_count = 0
+            elif index == 3:
+                staff_count = 2
+            else:
+                staff_count = 0 if rng.random() < 0.45 else rng.randint(1, 3)
+
+            for _ in range(staff_count):
+                is_active = rng.random() >= 0.08
+                session.add(
+                    GarageStaff(
+                        garage_id=garage.id,
+                        full_name=f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}",
+                        phone=f"+97798{rng.randint(10000000, 99999999)}",
+                        role_title=rng.choice(staff_roles),
+                        is_active=is_active,
+                    )
+                )
+                counts["staff"] += 1
+                if not is_active:
+                    counts["inactive_staff"] += 1
+
         await session.commit()
 
     print("Seed complete.")
-    print(f"  garages:           {GARAGE_COUNT} ({len(approved_garages)} approved, {len(public_garages)} publicly visible)")
+    print(
+        f"  garages:           {GARAGE_COUNT} "
+        f"({len(approved_garages)} approved, {len(public_garages)} publicly visible)"
+    )
     print(f"  owners:            {GARAGE_COUNT}")
     print(f"  customers:         {CUSTOMER_COUNT}")
     print(f"  services:          {len(services)}")
@@ -552,6 +602,7 @@ async def seed() -> None:
     print(f"  analytics events:  {counts['events']}")
     print(f"  pending changes:   {counts['pending_changes']}")
     print(f"  audit log rows:    {counts['audit']}")
+    print(f"  staff members:     {counts['staff']} ({counts['inactive_staff']} inactive)")
     print()
     print(f"Admin login:  {ADMIN_EMAIL}")
     print("Other logins: owner0001..owner0500 / customer0001..customer0200 @" + EMAIL_DOMAIN)
@@ -560,6 +611,7 @@ async def seed() -> None:
 
 
 async def main() -> None:
+    engine.echo = False
     try:
         await seed()
     finally:
