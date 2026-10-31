@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,11 +17,16 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = True
     SECRET_KEY: str = "change-me"
+    # Fernet key used only for roadside request contact/location snapshots.
+    # Generate with Fernet.generate_key() and keep the key stable/backed up.
+    ROADSIDE_DATA_KEY: str = ""
     API_V1_PREFIX: str = "/api/v1"
 
     # ── Database ─────────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/find_your_mechanic"
-    SYNC_DATABASE_URL: str = "postgresql+psycopg2://postgres:password@localhost:5432/find_your_mechanic"
+    SYNC_DATABASE_URL: str = (
+        "postgresql+psycopg2://postgres:password@localhost:5432/find_your_mechanic"
+    )
 
     # ── JWT ──────────────────────────────────────────────────────────────────
     JWT_ALGORITHM: str = "HS256"
@@ -50,6 +54,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "100/minute"
     RATE_LIMIT_AUTH: str = "10/minute"
     RATE_LIMIT_ANALYTICS: str = "30/minute"
+    RATE_LIMIT_ROADSIDE: str = "5/hour"
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     FRONTEND_URL: str = "http://localhost:5173"
@@ -62,4 +67,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

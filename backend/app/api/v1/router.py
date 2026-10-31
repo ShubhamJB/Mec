@@ -1,6 +1,7 @@
 """
 Centralised __init__ for app/api/v1 — imports all routers.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -17,6 +18,7 @@ from app.api.v1.endpoints import (
     owner_photos,
     owner_staff,
     reviews,
+    roadside,
     users,
 )
 from app.api.v1.endpoints.services import (
@@ -46,6 +48,7 @@ api_router.include_router(owner_garage.router, prefix="/owner", tags=["owner-gar
 api_router.include_router(owner_photos.router, prefix="/owner", tags=["owner-photos"])
 api_router.include_router(owner_staff.router, prefix="/owner", tags=["owner-staff"])
 api_router.include_router(owner_analytics.router, prefix="/owner", tags=["owner-analytics"])
+api_router.include_router(roadside.owner_router)
 
 # Catalogs
 api_router.include_router(services_router, prefix="/services", tags=["services"])
@@ -57,6 +60,7 @@ api_router.include_router(garages_public.router, tags=["public-garages"])
 
 # Customer Reviews & Reports
 api_router.include_router(reviews.router, tags=["reviews"])
+api_router.include_router(roadside.customer_router)
 
 # Administrator APIs
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

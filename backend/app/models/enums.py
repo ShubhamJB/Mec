@@ -2,6 +2,7 @@
 Shared enums used across all ORM models.
 Keep in sync with Pydantic schemas.
 """
+
 from __future__ import annotations
 
 import enum
@@ -73,6 +74,21 @@ class NotificationType(str, enum.Enum):
     REVIEW_RECEIVED = "REVIEW_RECEIVED"
     REVIEW_REPORT_RECEIVED = "REVIEW_REPORT_RECEIVED"
     REVIEW_REPORT_RESOLVED = "REVIEW_REPORT_RESOLVED"
+    ROADSIDE_REQUEST_RECEIVED = "ROADSIDE_REQUEST_RECEIVED"
+    ROADSIDE_REQUEST_UPDATED = "ROADSIDE_REQUEST_UPDATED"
+
+
+class RoadsideRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    CONTACTED = "CONTACTED"
+    CONFIRMED = "CONFIRMED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    DECLINED = "DECLINED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
+    UNABLE_TO_SERVE = "UNABLE_TO_SERVE"
 
 
 class ProfileChangeRequestStatus(str, enum.Enum):
@@ -98,4 +114,3 @@ class AdminActionType(str, enum.Enum):
     # Review moderation
     DISMISS_REVIEW_REPORT = "DISMISS_REVIEW_REPORT"
     REMOVE_REVIEW = "REMOVE_REVIEW"
-

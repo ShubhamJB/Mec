@@ -25,6 +25,7 @@ services:
       SYNC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-find_your_mechanic}
       STORAGE_PROVIDER: local
       UPLOAD_DIR: /app/uploads
+      ROADSIDE_DATA_KEY: ${ROADSIDE_DATA_KEY:-}
     volumes:
       - uploads:/app/uploads
     ports:

@@ -8,4 +8,3 @@ __pycache__
 .git
 tests
 Dockerfile
-docker-compose.yml
