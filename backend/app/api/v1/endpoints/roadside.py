@@ -14,7 +14,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.roadside import (
     EligibleGaragesResponse,
+    RoadsideLocationLabelRead,
     GuestRoadsideRequestStatusRead,
+    RoadsideContactCheckCreate,
     RoadsideCapabilityRead,
     RoadsideCapabilityUpdate,
     RoadsideRequestAction,
@@ -40,6 +42,17 @@ async def eligible_garages(
     return await roadside_service.eligible_garages(
         db, latitude, longitude, vehicle_type_id, service_id, search_radius_km
     )
+
+
+@customer_router.get("/location-label", response_model=RoadsideLocationLabelRead)
+@limiter.limit("20/minute")
+async def roadside_location_label(
+    request: Request,
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+) -> RoadsideLocationLabelRead:
+    label = await roadside_service.resolve_location_label(latitude, longitude)
+    return RoadsideLocationLabelRead(location_label=label)
 
 
 @customer_router.post(
@@ -70,6 +83,25 @@ async def guest_request_status(
     db: AsyncSession = Depends(get_db),
 ) -> GuestRoadsideRequestStatusRead:
     return await roadside_service.get_guest_request_status(db, request_id, contact_phone)
+
+
+@customer_router.post(
+    "/requests/{request_id}/contact-check", response_model=GuestRoadsideRequestStatusRead
+)
+@limiter.limit("10/minute")
+async def customer_contact_check(
+    request: Request,
+    request_id: uuid.UUID,
+    body: RoadsideContactCheckCreate,
+    contact_phone: str | None = Query(default=None, min_length=9, max_length=16),
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> GuestRoadsideRequestStatusRead:
+    if current_user is not None and current_user.role != UserRole.CUSTOMER:
+        raise HTTPException(status_code=403, detail="Only customers can answer this call check.")
+    return await roadside_service.record_customer_contact_check(
+        db, request_id, body.garage_called, current_user, contact_phone
+    )
 
 
 @customer_router.get("/requests", response_model=list[RoadsideRequestRead])
@@ -130,6 +162,15 @@ async def owner_request_detail(
     db: AsyncSession = Depends(get_db),
 ) -> RoadsideRequestRead:
     return await roadside_service.get_request(db, current_user, request_id, owner=True)
+
+
+@owner_router.post("/requests/{request_id}/calling", response_model=RoadsideRequestRead)
+async def owner_calling_rider(
+    request_id: uuid.UUID,
+    current_user: User = Depends(require_verified_owner),
+    db: AsyncSession = Depends(get_db),
+) -> RoadsideRequestRead:
+    return await roadside_service.owner_calling_rider(db, current_user.id, request_id)
 
 
 @owner_router.post("/requests/{request_id}/accept", response_model=RoadsideRequestRead)

@@ -44,7 +44,16 @@ from app.schemas.roadside import (
 from app.utils.geo import point_from_coords
 
 REQUEST_TTL = timedelta(minutes=15)
+CALL_FOLLOWUP_SLA = timedelta(minutes=3)
 COARSE_CELL_DEGREES = 0.05
+
+
+def _call_followup_failed(request: RoadsideRequest) -> bool:
+    return (
+        request.status == RoadsideRequestStatus.ACCEPTED
+        and request.customer_contact_confirmed is False
+        and datetime.now(timezone.utc) >= request.updated_at + CALL_FOLLOWUP_SLA
+    )
 
 
 def _not_found() -> HTTPException:
@@ -287,6 +296,10 @@ async def _reverse_geocode(latitude: float, longitude: float) -> str | None:
         return None
 
 
+async def resolve_location_label(latitude: float, longitude: float) -> str | None:
+    return await _reverse_geocode(latitude, longitude)
+
+
 async def _event(
     db: AsyncSession,
     row: RoadsideRequest,
@@ -392,6 +405,10 @@ async def _serialize(
         quote_amount=row.quote_amount,
         quote_currency=row.quote_currency,
         eta_minutes=row.eta_minutes,
+        accepted_at=row.accepted_at,
+        customer_contact_confirmed=row.customer_contact_confirmed,
+        owner_calling_at=row.owner_calling_at,
+        call_followup_failed=_call_followup_failed(row),
         decline_reason=row.decline_reason,
         expires_at=row.expires_at,
         created_at=row.created_at,
@@ -506,8 +523,110 @@ async def get_guest_request_status(
         quote_amount=request.quote_amount,
         quote_currency=request.quote_currency,
         eta_minutes=request.eta_minutes,
+        accepted_at=request.accepted_at,
+        customer_contact_confirmed=request.customer_contact_confirmed,
+        owner_calling_at=request.owner_calling_at,
+        call_followup_failed=_call_followup_failed(request),
         updated_at=request.updated_at,
     )
+
+
+async def record_customer_contact_check(
+    db: AsyncSession,
+    request_id: uuid.UUID,
+    garage_called: bool,
+    customer: User | None,
+    contact_phone: str | None,
+) -> GuestRoadsideRequestStatusRead:
+    request, garage = await _request_with_garage(db, request_id)
+    if customer is not None:
+        if request.customer_id != customer.id:
+            raise _not_found()
+    else:
+        private_data = decrypt_private_payload(request.private_data_encrypted)
+        if contact_phone is None or not secrets.compare_digest(
+            str(private_data.get("contact_phone", "")), contact_phone.strip()
+        ):
+            raise _not_found()
+    if request.status != RoadsideRequestStatus.ACCEPTED or request.accepted_at is None:
+        raise HTTPException(status_code=409, detail="This request is no longer waiting for a call check.")
+    call_check_started_at = request.owner_calling_at or request.accepted_at
+    if call_check_started_at + timedelta(seconds=20) > datetime.now(timezone.utc):
+        raise HTTPException(status_code=409, detail="You can confirm the call 20 seconds after the garage accepts or starts calling.")
+    if request.customer_contact_confirmed is not None:
+        raise HTTPException(status_code=409, detail="You have already answered this call check.")
+    request.customer_contact_confirmed = garage_called
+    updated_at = datetime.now(timezone.utc)
+    request.updated_at = updated_at
+    await _event(
+        db,
+        request,
+        customer.id if customer is not None else None,
+        request.status,
+        request.status,
+        {"event": "CUSTOMER_CONFIRMED_CALL" if garage_called else "CUSTOMER_NOT_REACHED"},
+    )
+    await db.flush()
+    if not garage_called:
+        db.add(
+            Notification(
+                user_id=garage.owner_id,
+                title="URGENT: Rider has not received a call",
+                message=f"High priority: the rider says they have not received a call. Call them now for roadside request {request.request_code}.",
+                notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+                related_entity_type="roadside_request",
+                related_entity_id=request.id,
+            )
+        )
+    return GuestRoadsideRequestStatusRead(
+        request_code=request.request_code,
+        garage_name=garage.name,
+        status=request.status,
+        decline_reason=request.decline_reason,
+        quote_amount=request.quote_amount,
+        quote_currency=request.quote_currency,
+        eta_minutes=request.eta_minutes,
+        accepted_at=request.accepted_at,
+        customer_contact_confirmed=request.customer_contact_confirmed,
+        owner_calling_at=request.owner_calling_at,
+        call_followup_failed=False,
+        updated_at=updated_at,
+    )
+
+
+async def owner_calling_rider(
+    db: AsyncSession, owner_id: uuid.UUID, request_id: uuid.UUID
+) -> RoadsideRequestRead:
+    request, garage = await _request_with_garage(db, request_id)
+    if garage.owner_id != owner_id:
+        raise _not_found()
+    await _expire_if_needed(db, request)
+    if request.status != RoadsideRequestStatus.ACCEPTED or request.customer_contact_confirmed is True:
+        raise HTTPException(status_code=409, detail="This request is not waiting for a call.")
+    if request.owner_calling_at is not None and request.customer_contact_confirmed is None:
+        raise HTTPException(status_code=409, detail="The garage has already started calling; wait for the rider's next check.")
+    now = datetime.now(timezone.utc)
+    request.owner_calling_at = now
+    request.customer_contact_confirmed = None
+    request.updated_at = now
+    await _event(
+        db,
+        request,
+        owner_id,
+        request.status,
+        request.status,
+        {"event": "OWNER_CALLING_RIDER", "message": "The garage is calling you now."},
+    )
+    if request.customer_id is not None:
+        db.add(Notification(
+            user_id=request.customer_id,
+            title="Garage is calling you now",
+            message=f"{garage.name} is calling you now about roadside request {request.request_code}.",
+            notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+            related_entity_type="roadside_request",
+            related_entity_id=request.id,
+        ))
+    return await _serialize(db, request, garage, reveal=True)
 
 
 async def _transition(
@@ -562,6 +681,17 @@ async def owner_action(
     await _expire_if_needed(db, request)
     if action == "accept":
         await _transition(db, request, owner_id, RoadsideRequestStatus.ACCEPTED, {})
+        if request.customer_id is not None:
+            db.add(
+                Notification(
+                    user_id=request.customer_id,
+                    title="Garage accepted your roadside request",
+                    message=f"{garage.name} accepted request {request.request_code} and should call you shortly.",
+                    notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+                    related_entity_type="roadside_request",
+                    related_entity_id=request.id,
+                )
+            )
     elif action == "decline":
         if request.status != RoadsideRequestStatus.PENDING:
             raise HTTPException(status_code=409, detail="Only pending requests can be declined.")

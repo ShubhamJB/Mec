@@ -180,7 +180,7 @@ Garage identity derives from authenticated owner, never arbitrary client-supplie
 - Exact Pydantic field nullability and enum values.
 - Decide whether `/garages/nearby` is a wrapper over shared discovery query logic (recommended).
 
-### Remote roadside assistance (backend implemented; frontend and delivery operations pending)
+### Roadside assistance (backend and first customer/owner UI implemented)
 The first release is a customer-initiated, garage-owner-managed request. The customer selects a nearby eligible garage, shares a problem summary and approximate location, and sends a request. The garage owner accepts or declines; acceptance unlocks the customer's contact/location details and prompts the owner to call and confirm the problem, price, and response estimate. A request does not promise dispatch or a fixed arrival time.
 
 #### Implemented first-slice decisions
@@ -189,11 +189,13 @@ The first release is a customer-initiated, garage-owner-managed request. The cus
 - The capability stores a callback expectation (1–240 minutes, default 15); a pending request expires after 15 minutes. Customer submissions are limited to five/hour per client IP.
 - Before acceptance, garage responses expose a coarse coordinate rounded to 0.01 degrees. After acceptance, exact coordinates, optional address, and customer phone are decrypted only for the customer and the accepted garage owner.
 - One request targets one garage. Staff are not request actors; the owner coordinates with staff offline.
-- `ROADSIDE_DATA_KEY` is a required stable Fernet key in Compose and must be backed up. The current slice does not implement sensitive-data retention/deletion, emergency guidance, support tooling, an outbox, or scheduled expiry processing.
+- The public customer flow supports signed-in and guest requests. It fetches up to 10 eligible garages ordered by distance, displays three at a time, removes declined garages from the visible pool and reveals the next match, and offers the next configured search radius when no garage matches.
+- `ROADSIDE_DATA_KEY` is a required stable Fernet key in Compose and must be backed up. Sensitive-data retention/deletion, emergency guidance, support tooling, an outbox, external SMS/push/email delivery, and scheduled expiry processing remain follow-up work.
 
 #### Proposed data model
 - `roadside_capabilities`: one-to-one with garage; `enabled`, `is_available`, `service_radius_km`, optional availability note, and timestamps. Keep operational availability separate from normal hours and temporary garage unavailability.
-- `roadside_requests`: UUID, customer and garage foreign keys, server-generated public request code, status, vehicle type, problem description, coarse location snapshot, encrypted exact latitude/longitude and contact snapshot, optional owner-confirmed quote/ETA, expiry and lifecycle timestamps, created/updated timestamps.
+- `roadside_requests`: UUID, customer and garage foreign keys, server-generated public request code, status, vehicle type, problem description, coarse location snapshot, encrypted exact latitude/longitude and contact snapshot, optional owner-confirmed quote/ETA, `customer_contact_confirmed` (nullable answer), `owner_calling_at` (latest owner call event), expiry and lifecycle timestamps, created/updated timestamps.
+- `call_followup_failed` is computed in roadside responses, not stored: it is true while the request remains ACCEPTED, the latest customer answer is “not reached,” and three minutes have elapsed since that answer (`updated_at`). A new owner call resets the answer and clears the flag. This produces a visible escalation without introducing a terminal request status.
 - `roadside_request_events`: append-only transition/audit trail with request, actor, from/to status, timestamp and safe metadata. Avoid copying secret contact/location into events.
 - Index active requests by garage/status/created time, customer/status/created time, and use PostGIS geography for eligible-garage radius matching. Add idempotency key per customer submission to prevent duplicate requests.
 - Keep new entities in dedicated tables/migration; do not overload analytics events, availability fields, or staff rows.
@@ -203,28 +205,33 @@ The first release is a customer-initiated, garage-owner-managed request. The cus
 
 | Method & path | Access | Purpose |
 |---|---|---|
-| GET `/roadside/eligible-garages` | Verified customer | Implemented: approved eligible garages, supported service/vehicle, available opt-in and PostGIS radius; ordered by distance. |
-| POST `/roadside/requests` | Verified customer | Implemented: create one pending request with explicit consent, encrypted private details, 15-minute expiry and in-app owner notification. |
-| GET `/roadside/requests` | Verified customer | Implemented: list caller's own requests with exact private details. |
+| GET `/roadside/eligible-garages` | Public | Implemented: approved eligible garages, supported service/vehicle, available opt-in and PostGIS radius; ordered by distance. |
+| GET `/roadside/location-label` | Public | Implemented: reverse-geocode coordinates into a nearby area/city label for the customer location form; bounded by a per-client rate limit. |
+| POST `/roadside/requests` | Public, optional customer auth | Implemented: create one pending request with explicit consent, encrypted private details, 15-minute expiry and in-app owner notification. |
+| GET `/roadside/requests` | Customer | Implemented: list caller's own requests with exact private details. |
 | GET `/roadside/requests/{id}` | Participating customer / garage owner | Implemented: owner-scoped; private data redacted from owner until accepted. |
 | POST `/owner/roadside/requests/{id}/accept` | Verified garage owner | Implemented: conditional atomic transition from pending and unlocks private fields. |
 | POST `/owner/roadside/requests/{id}/decline` | Verified garage owner | Implemented: pending-only decline with reason and customer in-app notice. |
+| POST `/owner/roadside/requests/{id}/calling` | Verified garage owner | Implemented: records `owner_calling_at` and an append-only same-status event, resets the current customer call-check answer, and creates an in-app customer notice when the rider has an account. Owner can call directly from request table or notification list. |
+| POST `/roadside/requests/{id}/contact-check` | Requesting customer or guest with matching phone | Implemented: accepts one yes/no answer per call attempt, 20 seconds after acceptance or latest owner call; persists the answer and safe audit event. “Not yet” creates a high-priority in-app owner alert and enables another owner call. |
+| GET `/roadside/requests/{id}/guest-status` | Guest with matching contact phone | Implemented: polling response includes current status, call-check answer, and `owner_calling_at` so guests can see the owner call update. |
 | PATCH `/owner/roadside/requests/{id}` | Verified garage owner | Implemented: legal contacted/confirmed/in-progress/completed/unable-to-serve transitions; quote/ETA optional. |
 | POST `/roadside/requests/{id}/cancel` | Requesting customer | Implemented: idempotent for repeated cancellation; allowed before work starts. |
 | PATCH `/owner/roadside/capability` | Verified garage owner | Implemented: opt-in, availability, radius, callback phone and callback expectation. `GET` capability is also available. |
 
 #### Delivery, privacy and frontend sequence
 - Current implementation persists an in-app notification in the request transaction. An outbox, retryable SMS/push/email delivery, and scheduled expiry worker remain follow-up work; pending requests are lazily expired when read or acted on.
-- Customer flow: permissioned location or manual pin → eligible list → one garage request → pending state with cancel/expiry → accepted state with callback instructions → confirmed status and owner estimate → completion/cancelled history.
-- Owner flow: explicit roadside availability setup → incoming request queue → safe preview → accept/decline → call customer → record confirmation, quote and ETA → progress/completion.
+- Customer flow: location and filters → up to 10 nearest matches (3 shown) → one garage request → pending state with cancel/expiry → accepted state → after 20 seconds, ask whether the garage called. The check repeats 20 seconds after each owner call. “Not yet” alerts the owner; “Yes” is persisted for the owner queue. If the owner does not start another call within three minutes of “Not yet,” responses derive `call_followup_failed` and both screens show **Failed to address**. A later call clears the flag and restarts the check. The owner table refreshes every 10 seconds and reflects rider confirmation/waiting state.
+- Owner flow: roadside availability setup → incoming request queue → safe preview → accept/decline → call rider from either the request row or notifications → record the call event and show the rider a calling update → rider call-check answer, quote/ETA, and service progress.
+- Notifications `/notifications` uses a severity/read/action table. The urgent roadside row includes a Call action for the assigned owner; the roadside page also has a dismissible notification dropdown. UI polling is used for now; delivery is not realtime push.
 - Store precise location/contact only as long as required by the request and retention policy; redact from logs, analytics, admin summaries and push payloads. Encrypt at rest where supported and never expose it to other garages or public discovery.
 - Add metrics for eligible results, requests, response time, accept/decline/expiry, cancellations and completion, without sensitive data.
 
 #### Implementation order and acceptance checks
-1. Backend foundations, migrations, matching, capability, request lifecycle and role redaction are implemented.
-2. Add customer eligible-garage/request/history UI, then owner capability/queue/detail/action UI.
-3. Add outbox, provider delivery retries, scheduled expiry, and sensitive data retention/deletion.
+1. Backend foundations, migrations, matching, capability, request lifecycle, call-check events and role redaction are implemented.
+2. Customer guest/auth request flow, owner queue/call controls, notifications page, and guest status polling are implemented.
+3. Add outbox/provider retries, external SMS/push, scheduled expiry, and sensitive data retention/deletion.
 4. Define emergency guidance, support ownership, and production operating procedures.
-5. Add database-backed verification for radius/filter behavior, role and ownership isolation, pre/post-acceptance redaction, race-safe acceptance, expiry/cancel boundaries, duplicate submission handling, notification retry, and mobile location permissions.
+5. Add database-backed verification for radius/filter behavior, role and ownership isolation, pre/post-acceptance redaction, race-safe acceptance, repeated 20-second call checks, three-minute follow-up escalation/clearing, expiry/cancel boundaries, duplicate submission handling, notification delivery, and mobile location permissions.
 
-This is a planning artifact only; no roadside schema, routes or UI should be treated as implemented. Do not infer roadside availability from normal operating hours.
+This section documents the current implementation and remaining production work. Do not infer roadside availability from normal operating hours.

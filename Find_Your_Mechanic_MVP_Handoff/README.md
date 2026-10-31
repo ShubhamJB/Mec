@@ -12,6 +12,6 @@ Files:
 Core ERD: 18 entities. Backend: FastAPI. Frontend: React. Database: PostgreSQL + PostGIS.
 API base path: /api/v1.
 
-The Markdown specs include optional, owner-private garage staff CRUD and the first roadside assistance backend slice. The Mermaid ERD source reflects the `garage_staff` entity; roadside tables are documented in the API/build handoff pending an ERD update. DOCX files are reference copies and may not reflect these Markdown updates.
+The Markdown specs include optional, owner-private garage staff CRUD and the implemented roadside assistance backend/first frontend slice. The ERD document records roadside tables and call-check fields; the Mermaid ERD source may still need a diagram refresh. DOCX files are reference copies and may not reflect these Markdown updates.
 
-The API design is a contract baseline; the running backend OpenAPI schema is the route-level reference. Roadside frontend, delivery workers, retention controls, and operational safety/support decisions remain pending.
+The API design is a contract baseline; the running backend OpenAPI schema is the route-level reference. Roadside delivery workers, sensitive-data retention controls, and operational safety/support decisions remain pending.

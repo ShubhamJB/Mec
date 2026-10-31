@@ -73,6 +73,8 @@ class RoadsideRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     quote_amount: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2), nullable=True)
     quote_currency: Mapped[str | None] = mapped_column(sa.String(3), nullable=True)
     eta_minutes: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
+    customer_contact_confirmed: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    owner_calling_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     decline_reason: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)

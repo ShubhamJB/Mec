@@ -76,6 +76,10 @@ class EligibleGaragesResponse(BaseModel):
     search_radius_km: int
 
 
+class RoadsideLocationLabelRead(BaseModel):
+    location_label: str | None = None
+
+
 class RoadsideRequestCreate(BaseModel):
     garage_id: uuid.UUID
     vehicle_type_id: uuid.UUID
@@ -114,6 +118,10 @@ class RoadsideRequestCreate(BaseModel):
 
 class RoadsideRequestAction(BaseModel):
     reason: str | None = Field(default=None, min_length=2, max_length=100)
+
+
+class RoadsideContactCheckCreate(BaseModel):
+    garage_called: bool
 
 
 class RoadsideRequestProgress(BaseModel):
@@ -171,6 +179,10 @@ class RoadsideRequestRead(BaseModel):
     quote_amount: Decimal | None = None
     quote_currency: str | None = None
     eta_minutes: int | None = None
+    accepted_at: datetime | None = None
+    customer_contact_confirmed: bool | None = None
+    owner_calling_at: datetime | None = None
+    call_followup_failed: bool = False
     decline_reason: str | None = None
     expires_at: datetime
     created_at: datetime
@@ -186,4 +198,8 @@ class GuestRoadsideRequestStatusRead(BaseModel):
     quote_amount: Decimal | None = None
     quote_currency: str | None = None
     eta_minutes: int | None = None
+    accepted_at: datetime | None = None
+    customer_contact_confirmed: bool | None = None
+    owner_calling_at: datetime | None = None
+    call_followup_failed: bool = False
     updated_at: datetime

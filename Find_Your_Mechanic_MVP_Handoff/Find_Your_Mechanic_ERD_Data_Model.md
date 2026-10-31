@@ -76,7 +76,16 @@ Catalog normalized name uniqueness should use a normalized column or unique inde
 - Catalog deactivation must transactionally ensure approved garages retain at least one active service/type.
 - Optional future reliability table: `notification_deliveries` or `outbox_events`; not included in the 18 core entities.
 - Staff are deactivated with `is_active=false`, not hard-deleted, so future job assignments can retain their identity. Use a restrictive garage FK consistent with history-bearing data; garage removal is soft deletion.
-- Roadside request entities and roadside-readiness fields are intentionally not in this schema revision; roadside assistance needs a separate lifecycle and product decision pass.
+- Roadside assistance is a separate extension to the 18 core entities. Migrations `4c7b2e91a6df`, `1f23b8a4cd11`, and `6d8a20f4c713` add readiness, requests/events, and rider/owner call-check state.
+
+## Roadside assistance extension (implemented)
+- **roadside_capabilities** — one row per garage; opt-in and current availability, service radius, callback phone/expectation, optional availability note, timestamps.
+- **roadside_requests** — request code, optional customer account, target garage, service/vehicle, status, coarse location and resolved location label, encrypted precise coordinates/address/contact, optional quote/ETA, 15-minute expiry, lifecycle timestamps, nullable `customer_contact_confirmed`, and nullable `owner_calling_at`.
+- **roadside_request_events** — append-only actor/time/from-status/to-status/safe-metadata records. Owner call and customer yes/no call-check responses are recorded as same-status events; event metadata contains no phone or exact location.
+- Owner call state uses `owner_calling_at` as the start of the next 20-second rider check and resets `customer_contact_confirmed` to null. Rider answer is true when reached, false when not reached, and null while awaiting a response/check. A further owner call resets the answer and starts another check interval.
+- `call_followup_failed` is a computed API/UI flag (not a database column): true when status remains ACCEPTED and the rider’s latest answer is false for at least three minutes based on `updated_at`. A new owner call resets the answer and clears the flag; this is an escalation label, not a request lifecycle status.
+- Roadside indexes cover garage/status/created time, customer/created time, expiry, request code, and event request ID. Garage location uses the existing GiST geography index.
+- **Notification severity is currently application-level:** an urgent roadside notice has an `URGENT:` title and the UI renders it as High. The notifications table has no persisted severity column yet.
 
 ## Mermaid source
 See `find_your_mechanic_erd.mmd` in this package.
