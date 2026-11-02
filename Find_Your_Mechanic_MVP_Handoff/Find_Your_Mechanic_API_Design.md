@@ -216,22 +216,24 @@ The first release is a customer-initiated, garage-owner-managed request. The cus
 | POST `/roadside/requests/{id}/contact-check` | Requesting customer or guest with matching phone | Implemented: accepts one yes/no answer per call attempt, 20 seconds after acceptance or latest owner call; persists the answer and safe audit event. “Not yet” creates a high-priority in-app owner alert and enables another owner call. |
 | GET `/roadside/requests/{id}/guest-status` | Guest with matching contact phone | Implemented: polling response includes current status, call-check answer, and `owner_calling_at` so guests can see the owner call update. |
 | PATCH `/owner/roadside/requests/{id}` | Verified garage owner | Implemented: legal contacted/confirmed/in-progress/completed/unable-to-serve transitions; quote/ETA optional. |
+| POST `/roadside/requests/{id}/feedback` | Requesting customer or guest with matching phone | Implemented: after COMPLETED, accepts one resolution answer (RESOLVED/PARTIAL/UNRESOLVED), optional 1–5 rating and comment; partial/unresolved creates an urgent owner notification. |
 | POST `/roadside/requests/{id}/cancel` | Requesting customer | Implemented: idempotent for repeated cancellation; allowed before work starts. |
 | PATCH `/owner/roadside/capability` | Verified garage owner | Implemented: opt-in, availability, radius, callback phone and callback expectation. `GET` capability is also available. |
 
 #### Delivery, privacy and frontend sequence
 - Current implementation persists an in-app notification in the request transaction. An outbox, retryable SMS/push/email delivery, and scheduled expiry worker remain follow-up work; pending requests are lazily expired when read or acted on.
 - Customer flow: location and filters → up to 10 nearest matches (3 shown) → one garage request → pending state with cancel/expiry → accepted state → after 20 seconds, ask whether the garage called. The check repeats 20 seconds after each owner call. “Not yet” alerts the owner; “Yes” is persisted for the owner queue. If the owner does not start another call within three minutes of “Not yet,” responses derive `call_followup_failed` and both screens show **Failed to address**. A later call clears the flag and restarts the check. The owner table refreshes every 10 seconds and reflects rider confirmation/waiting state.
-- Owner flow: roadside availability setup → incoming request queue → safe preview → accept/decline → call rider from either the request row or notifications → record the call event and show the rider a calling update → rider call-check answer, quote/ETA, and service progress.
+- Owner flow: roadside availability setup → incoming request queue → safe preview → accept/decline → call rider from either the request row or notifications → record the call event and show the rider a calling update → rider call-check answer, quote/ETA, and service progress → view customer resolution feedback and call back when partial/unresolved.
 - Notifications `/notifications` uses a severity/read/action table. The urgent roadside row includes a Call action for the assigned owner; the roadside page also has a dismissible notification dropdown. UI polling is used for now; delivery is not realtime push.
 - Store precise location/contact only as long as required by the request and retention policy; redact from logs, analytics, admin summaries and push payloads. Encrypt at rest where supported and never expose it to other garages or public discovery.
-- Add metrics for eligible results, requests, response time, accept/decline/expiry, cancellations and completion, without sensitive data.
+- Customer completion feedback is stored on the request: one RESOLVED/PARTIAL/UNRESOLVED outcome, optional 1–5 rating and comment, and submission timestamp. It is accepted once and only after COMPLETED; guests prove access with the original phone number. Partial/unresolved feedback creates an urgent in-app garage-owner notification. No customer account or SMS provider is required.
+- Add metrics for eligible results, requests, response time, accept/decline/expiry, cancellations, completion, resolution feedback and ratings, without sensitive data.
 
 #### Implementation order and acceptance checks
 1. Backend foundations, migrations, matching, capability, request lifecycle, call-check events and role redaction are implemented.
 2. Customer guest/auth request flow, owner queue/call controls, notifications page, and guest status polling are implemented.
 3. Add outbox/provider retries, external SMS/push, scheduled expiry, and sensitive data retention/deletion.
 4. Define emergency guidance, support ownership, and production operating procedures.
-5. Add database-backed verification for radius/filter behavior, role and ownership isolation, pre/post-acceptance redaction, race-safe acceptance, repeated 20-second call checks, three-minute follow-up escalation/clearing, expiry/cancel boundaries, duplicate submission handling, notification delivery, and mobile location permissions.
+5. Add database-backed verification for radius/filter behavior, role and ownership isolation, pre/post-acceptance redaction, race-safe acceptance, repeated 20-second call checks, three-minute follow-up escalation/clearing, expiry/cancel boundaries, duplicate submission handling, notification delivery, customer completion feedback authorization/one-time behavior, and mobile location permissions.
 
 This section documents the current implementation and remaining production work. Do not infer roadside availability from normal operating hours.
