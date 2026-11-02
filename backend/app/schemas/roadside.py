@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -124,6 +125,26 @@ class RoadsideContactCheckCreate(BaseModel):
     garage_called: bool
 
 
+class RoadsideCustomerFeedbackCreate(BaseModel):
+    resolution: Literal["RESOLVED", "PARTIAL", "UNRESOLVED"]
+    rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("comment")
+    @classmethod
+    def clean_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return " ".join(value.split()) or None
+
+
+class RoadsideCustomerFeedbackRead(BaseModel):
+    resolution: Literal["RESOLVED", "PARTIAL", "UNRESOLVED"]
+    rating: int | None = None
+    comment: str | None = None
+    submitted_at: datetime
+
+
 class RoadsideRequestProgress(BaseModel):
     status: RoadsideRequestStatus = Field(
         description=(
@@ -181,6 +202,10 @@ class RoadsideRequestRead(BaseModel):
     eta_minutes: int | None = None
     accepted_at: datetime | None = None
     customer_contact_confirmed: bool | None = None
+    customer_feedback_resolution: Literal["RESOLVED", "PARTIAL", "UNRESOLVED"] | None = None
+    customer_feedback_rating: int | None = None
+    customer_feedback_comment: str | None = None
+    customer_feedback_at: datetime | None = None
     owner_calling_at: datetime | None = None
     call_followup_failed: bool = False
     decline_reason: str | None = None
@@ -200,6 +225,10 @@ class GuestRoadsideRequestStatusRead(BaseModel):
     eta_minutes: int | None = None
     accepted_at: datetime | None = None
     customer_contact_confirmed: bool | None = None
+    customer_feedback_resolution: Literal["RESOLVED", "PARTIAL", "UNRESOLVED"] | None = None
+    customer_feedback_rating: int | None = None
+    customer_feedback_comment: str | None = None
+    customer_feedback_at: datetime | None = None
     owner_calling_at: datetime | None = None
     call_followup_failed: bool = False
     updated_at: datetime

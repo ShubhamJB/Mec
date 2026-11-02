@@ -36,6 +36,8 @@ from app.schemas.roadside import (
     GuestRoadsideRequestStatusRead,
     RoadsideCapabilityRead,
     RoadsideCapabilityUpdate,
+    RoadsideCustomerFeedbackCreate,
+    RoadsideCustomerFeedbackRead,
     RoadsideRequestCreate,
     RoadsideRequestEventRead,
     RoadsideRequestProgress,
@@ -407,6 +409,10 @@ async def _serialize(
         eta_minutes=row.eta_minutes,
         accepted_at=row.accepted_at,
         customer_contact_confirmed=row.customer_contact_confirmed,
+        customer_feedback_resolution=row.customer_feedback_resolution,
+        customer_feedback_rating=row.customer_feedback_rating,
+        customer_feedback_comment=row.customer_feedback_comment,
+        customer_feedback_at=row.customer_feedback_at,
         owner_calling_at=row.owner_calling_at,
         call_followup_failed=_call_followup_failed(row),
         decline_reason=row.decline_reason,
@@ -525,6 +531,10 @@ async def get_guest_request_status(
         eta_minutes=request.eta_minutes,
         accepted_at=request.accepted_at,
         customer_contact_confirmed=request.customer_contact_confirmed,
+        customer_feedback_resolution=request.customer_feedback_resolution,
+        customer_feedback_rating=request.customer_feedback_rating,
+        customer_feedback_comment=request.customer_feedback_comment,
+        customer_feedback_at=request.customer_feedback_at,
         owner_calling_at=request.owner_calling_at,
         call_followup_failed=_call_followup_failed(request),
         updated_at=request.updated_at,
@@ -539,15 +549,17 @@ async def record_customer_contact_check(
     contact_phone: str | None,
 ) -> GuestRoadsideRequestStatusRead:
     request, garage = await _request_with_garage(db, request_id)
-    if customer is not None:
-        if request.customer_id != customer.id:
-            raise _not_found()
-    else:
+    if customer is not None and request.customer_id == customer.id:
+        actor_id = customer.id
+    elif request.customer_id is None:
         private_data = decrypt_private_payload(request.private_data_encrypted)
         if contact_phone is None or not secrets.compare_digest(
             str(private_data.get("contact_phone", "")), contact_phone.strip()
         ):
             raise _not_found()
+        actor_id = None
+    else:
+        raise _not_found()
     if request.status != RoadsideRequestStatus.ACCEPTED or request.accepted_at is None:
         raise HTTPException(status_code=409, detail="This request is no longer waiting for a call check.")
     call_check_started_at = request.owner_calling_at or request.accepted_at
@@ -561,7 +573,7 @@ async def record_customer_contact_check(
     await _event(
         db,
         request,
-        customer.id if customer is not None else None,
+        actor_id,
         request.status,
         request.status,
         {"event": "CUSTOMER_CONFIRMED_CALL" if garage_called else "CUSTOMER_NOT_REACHED"},
@@ -588,9 +600,77 @@ async def record_customer_contact_check(
         eta_minutes=request.eta_minutes,
         accepted_at=request.accepted_at,
         customer_contact_confirmed=request.customer_contact_confirmed,
+        customer_feedback_resolution=request.customer_feedback_resolution,
+        customer_feedback_rating=request.customer_feedback_rating,
+        customer_feedback_comment=request.customer_feedback_comment,
+        customer_feedback_at=request.customer_feedback_at,
         owner_calling_at=request.owner_calling_at,
         call_followup_failed=False,
         updated_at=updated_at,
+    )
+
+
+async def submit_customer_feedback(
+    db: AsyncSession,
+    request_id: uuid.UUID,
+    dto: RoadsideCustomerFeedbackCreate,
+    customer: User | None,
+    contact_phone: str | None,
+) -> RoadsideCustomerFeedbackRead:
+    request, garage = await _request_with_garage(db, request_id)
+    if request.status != RoadsideRequestStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Feedback is available after the garage marks the request complete.")
+    if request.customer_feedback_at is not None:
+        raise HTTPException(status_code=409, detail="Feedback has already been submitted for this request.")
+
+    if request.customer_id is not None:
+        if customer is None or request.customer_id != customer.id:
+            raise _not_found()
+        actor_id = customer.id
+    else:
+        private_data = decrypt_private_payload(request.private_data_encrypted)
+        if contact_phone is None or not secrets.compare_digest(
+            str(private_data.get("contact_phone", "")), contact_phone.strip()
+        ):
+            raise _not_found()
+        actor_id = None
+
+    now = datetime.now(timezone.utc)
+    request.customer_feedback_resolution = dto.resolution
+    request.customer_feedback_rating = dto.rating
+    request.customer_feedback_comment = dto.comment
+    request.customer_feedback_at = now
+    request.updated_at = now
+    await _event(
+        db,
+        request,
+        actor_id,
+        RoadsideRequestStatus.COMPLETED,
+        RoadsideRequestStatus.COMPLETED,
+        {"event": "CUSTOMER_FEEDBACK_SUBMITTED", "resolution": dto.resolution},
+    )
+    needs_follow_up = dto.resolution in {"PARTIAL", "UNRESOLVED"}
+    unresolved = dto.resolution == "UNRESOLVED"
+    db.add(
+        Notification(
+            user_id=garage.owner_id,
+            title="URGENT: Rider still needs roadside follow-up" if needs_follow_up else "Rider shared roadside feedback",
+            message=(
+                f"The rider reported that request {request.request_code} was {('not resolved' if unresolved else 'only partly resolved')}. Contact them to follow up."
+                if needs_follow_up
+                else f"The rider submitted feedback for completed roadside request {request.request_code}."
+            ),
+            notification_type=NotificationType.ROADSIDE_REQUEST_UPDATED,
+            related_entity_type="roadside_request",
+            related_entity_id=request.id,
+        )
+    )
+    await db.flush()
+    return RoadsideCustomerFeedbackRead(
+        resolution=dto.resolution,
+        rating=dto.rating,
+        comment=dto.comment,
+        submitted_at=now,
     )
 
 

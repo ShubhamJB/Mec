@@ -42,6 +42,14 @@ class RoadsideRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         sa.Index("ix_roadside_requests_expires_at", "expires_at"),
         sa.CheckConstraint("coarse_latitude BETWEEN -90 AND 90", name="ck_roadside_latitude"),
         sa.CheckConstraint("coarse_longitude BETWEEN -180 AND 180", name="ck_roadside_longitude"),
+        sa.CheckConstraint(
+            "customer_feedback_resolution IS NULL OR customer_feedback_resolution IN ('RESOLVED', 'PARTIAL', 'UNRESOLVED')",
+            name="ck_roadside_feedback_resolution",
+        ),
+        sa.CheckConstraint(
+            "customer_feedback_rating IS NULL OR customer_feedback_rating BETWEEN 1 AND 5",
+            name="ck_roadside_feedback_rating",
+        ),
     )
 
     customer_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -74,6 +82,10 @@ class RoadsideRequest(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     quote_currency: Mapped[str | None] = mapped_column(sa.String(3), nullable=True)
     eta_minutes: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
     customer_contact_confirmed: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    customer_feedback_resolution: Mapped[str | None] = mapped_column(sa.String(16), nullable=True)
+    customer_feedback_rating: Mapped[int | None] = mapped_column(sa.SmallInteger, nullable=True)
+    customer_feedback_comment: Mapped[str | None] = mapped_column(sa.String(1000), nullable=True)
+    customer_feedback_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     owner_calling_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     decline_reason: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)

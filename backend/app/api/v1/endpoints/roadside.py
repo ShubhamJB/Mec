@@ -19,6 +19,8 @@ from app.schemas.roadside import (
     RoadsideContactCheckCreate,
     RoadsideCapabilityRead,
     RoadsideCapabilityUpdate,
+    RoadsideCustomerFeedbackCreate,
+    RoadsideCustomerFeedbackRead,
     RoadsideRequestAction,
     RoadsideRequestCreate,
     RoadsideRequestProgress,
@@ -101,6 +103,25 @@ async def customer_contact_check(
         raise HTTPException(status_code=403, detail="Only customers can answer this call check.")
     return await roadside_service.record_customer_contact_check(
         db, request_id, body.garage_called, current_user, contact_phone
+    )
+
+
+@customer_router.post(
+    "/requests/{request_id}/feedback", response_model=RoadsideCustomerFeedbackRead
+)
+@limiter.limit("5/hour")
+async def customer_roadside_feedback(
+    request: Request,
+    request_id: uuid.UUID,
+    body: RoadsideCustomerFeedbackCreate,
+    contact_phone: str | None = Query(default=None, min_length=9, max_length=16),
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> RoadsideCustomerFeedbackRead:
+    if current_user is not None and current_user.role != UserRole.CUSTOMER:
+        raise HTTPException(status_code=403, detail="Only customers can submit roadside feedback.")
+    return await roadside_service.submit_customer_feedback(
+        db, request_id, body, current_user, contact_phone
     )
 
 
